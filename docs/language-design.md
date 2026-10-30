@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.6 — Reference identity
+**Version:** 0.7 — Comparing values through references
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -346,6 +346,7 @@ Built-in methods:
 | `int64 toInt64()`                    | The text parsed as an `int64`                                            |
 | `float64 toFloat64()`                | The text parsed as a `float64`                                           |
 | `String copy()`                      | An independent copy (§7.2)                                               |
+| `boolean equals(String* text)`       | Whether both strings hold the same bytes (§6.9)                          |
 
 `String.of(value)` creates a new `String` from a value of a primitive or enum type, with the same text `print` would write (§15): `String.of(42)` is `"42"`.
 
@@ -406,7 +407,18 @@ A local variable declared without an initialiser holds its type's zero value, ex
 
 Both operands must be values of the same type, after implicit conversion for numbers (§6.2).
 
-A reference (a `T*` parameter, `this`, or an alias of either) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. What a reference reaches is a value: compare its fields (`a.x == b.x`), or use `is` to check whether two references point to the same object (§6.10).
+A reference (a `T*` parameter, `this`, or an alias of either) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. Readers coming from different languages would expect `==` on references to compare either addresses or values, so Nirea makes both explicit:
+
+- `a is b` checks whether two references point to the same object (§6.10).
+- `a.equals(b)` compares the values `a` and `b` refer to, by structure, exactly as `==` compares two values.
+
+`equals` is built in for every struct, array and `String` type. The object it is called on and its argument are both used in place, like `T*` parameters: nothing is copied and nothing changes owner. Either side can be a reference or a value, so `answer.equals("yes")` compares a `String*` parameter with a literal. Fields reached through a reference are values and can be compared with `==` directly (`a.x == b.x`). Interface values have no `equals`.
+
+```nirea
+boolean sameContents(Engine* a, Engine* b) {
+    return a.equals(b);          // compares the engines' fields
+}
+```
 
 ### 6.10 Identity
 
@@ -488,7 +500,7 @@ Engine second = first.copy();
 
 `copy()` creates an independent object.
 
-`copy()` is built in for every struct, array and `String` type, and makes a deep copy: owned fields and elements are copied too. A struct can't declare its own method named `copy`; type-defined copying is an open question (§18).
+`copy()` is built in for every struct, array and `String` type, and makes a deep copy: owned fields and elements are copied too. A struct can't declare its own method named `copy` or `equals` (§6.9); type-defined copying and equality are open questions (§18).
 
 ### 7.3 Passing values and references
 
@@ -1078,7 +1090,7 @@ The following decisions require further specification.
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | References  | Whether read-only references are needed once types can own heap resources, and whether primitive values can be passed by reference (`int*`) |
 | Lifetimes   | How references stored inside structs would be checked, if they are allowed                                                                  |
-| Copying     | Type-defined copy behaviour                                                                                                                 |
+| Copying     | Type-defined copy and equality behaviour                                                                                                    |
 | Destruction | User-defined destructors for structs that hold resources such as file handles                                                               |
 | Mutability  | How is object mutation distinguished from field replacement?                                                                                |
 | Overloading | Whether functions, methods and constructors can be overloaded                                                                               |
@@ -1157,7 +1169,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.6. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.7. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
