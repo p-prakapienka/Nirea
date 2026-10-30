@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.7 — Comparing values through references
+**Version:** 0.8 — String concatenation
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -294,7 +294,7 @@ A negated literal counts as a single literal, so `int8 low = -128;` is valid. Th
 
 ### 6.4 Arithmetic and runtime errors
 
-Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2): one operand is converted to the other's type, and arithmetic produces a value of that type. If neither operand converts to the other's type, a cast is needed. For example, `int8 + int` is an `int`, but `uint8 + int8` and `int + float` are errors. Unary minus isn't allowed on unsigned types.
+Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2): one operand is converted to the other's type, and arithmetic produces a value of that type. If neither operand converts to the other's type, a cast is needed. For example, `int8 + int` is an `int`, but `uint8 + int8` and `int + float` are errors. Unary minus isn't allowed on unsigned types. `+` also concatenates strings (§6.5).
 
 Integer division truncates toward zero, and the remainder has the sign of the dividend, as in C and Java: `-7 / 2` is `-3` and `-7 % 2` is `-1`.
 
@@ -352,7 +352,16 @@ Built-in methods:
 
 An index outside the string (for `charAt` and `setCharAt`, outside `0` to `length() - 1`; for `substring`, unless `0 <= from <= to <= length()`) is a runtime error, as for arrays (§6.4). `toInt`, `toInt64` and `toFloat64` accept an optional `-` or `+` followed by a decimal number, with a fractional part and exponent only for `toFloat64` (which also accepts `NaN`, `Infinity` and `-Infinity`). Anything else, including a value out of range for the type, is a runtime error.
 
-Strings can be compared with `==` (§6.9), printed (§15) and passed to C functions (§14). `+` doesn't concatenate strings; use `append`.
+`a + b` creates a new `String` holding the bytes of `a` followed by the bytes of `b`. Both operands must be strings; other values are converted explicitly with `String.of`, as in `"count: " + String.of(count)`. The operands are used in place, like `String*` parameters: they don't change and don't transfer ownership, and either can be a reference. `a += b` appends `b` to `a`, with the same result as `a = a + b`; like any assignment it needs a variable, field or array element on the left, so through a `String*` reference use `append`.
+
+```nirea
+String name = "Nirea";
+String greeting = "Hello, " + name + "!";
+greeting += " v" + String.of(8);
+println(greeting);                 // Hello, Nirea! v8
+```
+
+Strings can be compared with `==` (§6.9), printed (§15) and passed to C functions (§14).
 
 ### 6.6 Arrays
 
@@ -1169,7 +1178,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.7. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.8. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
