@@ -118,7 +118,8 @@ static bool is_new_object(Expr *e) {
     case E_CALL_STRING:
     case E_COPY:
     case E_STRING:
-    case E_CONST: return true;
+    case E_CONST:
+    case E_BINARY: return true; /* string concatenation */
     case E_SWITCH:
         for (int i = 0; i < e->sw->arms.len; i++) {
             if (!is_new_object(e->sw->arms.data[i].expr)) return false;

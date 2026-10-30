@@ -1,4 +1,4 @@
-// A constructor can take ownership of a value parameter (§5.4, §7.3).
+// A constructor can store the copy it receives through a value parameter (§5.4, §7.3).
 
 struct Engine {
     int power;

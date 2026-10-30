@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.7 — Comparing values through references
+**Version:** 0.9 — Value parameters receive copies
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -294,7 +294,7 @@ A negated literal counts as a single literal, so `int8 low = -128;` is valid. Th
 
 ### 6.4 Arithmetic and runtime errors
 
-Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2): one operand is converted to the other's type, and arithmetic produces a value of that type. If neither operand converts to the other's type, a cast is needed. For example, `int8 + int` is an `int`, but `uint8 + int8` and `int + float` are errors. Unary minus isn't allowed on unsigned types.
+Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2): one operand is converted to the other's type, and arithmetic produces a value of that type. If neither operand converts to the other's type, a cast is needed. For example, `int8 + int` is an `int`, but `uint8 + int8` and `int + float` are errors. Unary minus isn't allowed on unsigned types. `+` also concatenates strings (§6.5).
 
 Integer division truncates toward zero, and the remainder has the sign of the dividend, as in C and Java: `-7 / 2` is `-3` and `-7 % 2` is `-1`.
 
@@ -316,9 +316,9 @@ Floating-point arithmetic follows IEEE 754: division or remainder by zero produc
 
 ### 6.5 Strings
 
-`String` is a built-in object type holding a sequence of bytes. Like a struct, a `String` is owned (§7): assigning it, returning it or passing it to a value parameter transfers ownership, a `String*` parameter refers to it in place, and `copy()` creates an independent copy. A `String` field or array element is part of its owner.
+`String` is a built-in object type holding a sequence of bytes. A `String` follows exactly the same rules as a struct (§7): assigning it or returning it transfers ownership, passing it to a value parameter passes a copy (§7.3), a `String*` parameter refers to it in place, and `copy()` creates an independent copy. A `String` field or array element is part of its owner. Each `String` has its own bytes, freed automatically when its owner ends (§7.6).
 
-A string literal such as `"text"` creates a new `String` object each time it is evaluated. A `String` can be changed through its methods; changes never affect other `String` objects.
+The only difference from a struct is the string literal: `"text"` creates a new `String` object each time it is evaluated, so it can initialise or be assigned to any `String` variable. A `String` can be changed through its methods; changes never affect other `String` objects.
 
 ```nirea
 String greeting = "Hello";
@@ -326,9 +326,12 @@ greeting.append(", Nirea");
 greeting.appendChar('!');
 println(greeting);                 // Hello, Nirea!
 
-String copy = greeting.copy();
+String copy = greeting.copy();    // both stay usable
 copy.setCharAt(0, 'J');
-println(greeting.charAt(0));       // H
+println(greeting);                 // Hello, Nirea!
+println(copy);                     // Jello, Nirea!
+
+String moved = greeting;           // greeting is no longer accessible
 ```
 
 Built-in methods:
@@ -352,7 +355,16 @@ Built-in methods:
 
 An index outside the string (for `charAt` and `setCharAt`, outside `0` to `length() - 1`; for `substring`, unless `0 <= from <= to <= length()`) is a runtime error, as for arrays (§6.4). `toInt`, `toInt64` and `toFloat64` accept an optional `-` or `+` followed by a decimal number, with a fractional part and exponent only for `toFloat64` (which also accepts `NaN`, `Infinity` and `-Infinity`). Anything else, including a value out of range for the type, is a runtime error.
 
-Strings can be compared with `==` (§6.9), printed (§15) and passed to C functions (§14). `+` doesn't concatenate strings; use `append`.
+`a + b` creates a new `String` holding the bytes of `a` followed by the bytes of `b`. Both operands must be strings; other values are converted explicitly with `String.of`, as in `"count: " + String.of(count)`. The operands are used in place, like `String*` parameters: they don't change and don't transfer ownership, and either can be a reference. `a += b` appends `b` to `a`, with the same result as `a = a + b`; like any assignment it needs a variable, field or array element on the left, so through a `String*` reference use `append`.
+
+```nirea
+String name = "Nirea";
+String greeting = "Hello, " + name + "!";
+greeting += " v" + String.of(8);
+println(greeting);                 // Hello, Nirea! v8
+```
+
+Strings can be compared with `==` (§6.9), printed (§15) and passed to C functions (§14).
 
 ### 6.6 Arrays
 
@@ -467,8 +479,9 @@ Ownership is transferred when a local variable is used as:
 - the initialiser of a variable declaration: `Engine second = first;`
 - the right-hand side of an assignment to a variable, field or array element: `vehicle.engine = first;`
 - the value of a `return` statement: `return first;`
-- an argument for a value parameter (§7.3): `install(first);`
 - an element of an array initialiser, or the value of a switch-expression arm (§10.1) used in one of these positions.
+
+Passing an object to a value parameter doesn't transfer ownership: the parameter receives a copy (§7.3).
 
 Only a local variable, as a whole, can give its object to a new owner; value parameters count as local variables. An object owned by another object is part of that owner's memory and stays part of it: fields and array elements can't be given to a new owner. Neither can the objects that reference parameters, `this` and aliases refer to, because they belong to someone else. To get an independent object from any of them, call `copy()`:
 
@@ -506,28 +519,28 @@ Engine second = first.copy();
 
 A struct, array or `String` parameter is either a value or a reference.
 
-A **value parameter**, written `Engine engine`, is an object of its own in the called function's memory. The argument's contents are placed there, and the function owns that object. Inside the function, a value parameter is an owned local variable: it can be modified, assigned, returned, stored in a field or passed on by value. Changes to it aren't visible to the caller.
+A **value parameter**, written `Engine engine`, receives a copy of its argument: an object of its own in the called function's memory, owned by the function. The copy is deep, as with `copy()` (§7.2), and the caller's object is unchanged and stays usable. Any object can be passed by value: a local variable, a field, an array element, a reference or `this`. A call result, such as `createEngine()`, is passed without copying, since nothing else owns it.
 
-When the argument is a local variable, ownership is transferred, exactly as for assignment (§7.1): the caller's variable can't be used afterwards.
+Inside the function, a value parameter is an owned local variable: it can be modified, assigned, returned, stored in a field or passed on by value. Changes to it aren't visible to the caller.
 
 ```nirea
 struct Vehicle {
     Engine engine;
 
     void setEngine(Engine engine) {
-        this.engine = engine;      // the field becomes the owner
+        this.engine = engine;      // the field becomes the owner of the copy
     }
 }
 
 void main() {
     Engine engine = createEngine();
     Vehicle vehicle;
-    vehicle.setEngine(engine);     // setEngine now owns the engine
-    // engine is no longer accessible.
+    vehicle.setEngine(engine);     // setEngine receives a copy
+    println(engine.getPower());    // engine is still usable
 }
 ```
 
-Only a function's own local variable can be passed by value. A field or an array element is part of its owner and stays there, so it can't be passed by value. Neither can a reference parameter, `this` or an alias, whose objects belong to someone else. To pass one of them by value, the caller passes a copy: `vehicle.setEngine(spare.engine.copy());`. A call result, such as `createEngine()`, can be passed by value directly.
+This is the one deliberate exception to Nirea's rule against implicit copying (§17): it saves writing `copy()` for every call, and works the same for structs, arrays and strings. To pass an object without copying it, declare the parameter as a reference.
 
 A **reference parameter**, written with `*` after the type, refers to the caller's object where it is in memory. The object stays part of its owner, and ownership doesn't change. The call site looks the same as for a value: `inspect(engine)`.
 
@@ -557,7 +570,7 @@ void setEngine(Engine* engine) {
 
 `T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the object it refers to. Only struct, array, `String` and interface types can be passed by reference. Interface parameters must be references (§5.3).
 
-The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. A call can't take a local by value while also referring to it through the receiver or a reference parameter. Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
+The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
 
 The method receiver `this` is a reference to the object the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
 
@@ -1070,7 +1083,7 @@ The initial language deliberately excludes:
 - Class and struct inheritance.
 - Garbage collection.
 - User-visible raw pointers.
-- Implicit copying.
+- Implicit copying, except for value parameters (§7.3).
 - Implicit narrowing conversions.
 - Property syntactic sugar.
 - Implicit getter/setter generation.
@@ -1169,7 +1182,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.7. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.9. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;

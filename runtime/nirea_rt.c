@@ -235,6 +235,18 @@ void nr_str_append(nr_String *s, const nr_String *text) {
     s->ptr[s->len] = '\0';
 }
 
+nr_String nr_str_concat(const nr_String *a, const nr_String *b) {
+    if (a->len > INT64_MAX - b->len - 1) nr_panic("out of memory", "?");
+    nr_String s;
+    s.cap = a->len + b->len + 1;
+    s.ptr = checked_realloc(NULL, (size_t)s.cap);
+    if (a->len) memcpy(s.ptr, a->ptr, (size_t)a->len);
+    if (b->len) memcpy(s.ptr + a->len, b->ptr, (size_t)b->len);
+    s.len = a->len + b->len;
+    s.ptr[s.len] = '\0';
+    return s;
+}
+
 void nr_str_append_char(nr_String *s, uint8_t c) {
     str_reserve(s, s->len + 1);
     s->ptr[s->len++] = (char)c;

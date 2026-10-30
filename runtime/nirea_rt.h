@@ -51,6 +51,7 @@ int32_t nr_str_length(const nr_String *s, const char *loc);
 uint8_t nr_str_char_at(const nr_String *s, int64_t index, const char *loc);
 void nr_str_set_char_at(nr_String *s, int64_t index, uint8_t c, const char *loc);
 void nr_str_append(nr_String *s, const nr_String *text);
+nr_String nr_str_concat(const nr_String *a, const nr_String *b);
 void nr_str_append_char(nr_String *s, uint8_t c);
 nr_String nr_str_substring(const nr_String *s, int64_t from, int64_t to, const char *loc);
 int32_t nr_str_index_of(const nr_String *s, const nr_String *text);

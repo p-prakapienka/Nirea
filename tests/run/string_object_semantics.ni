@@ -1,14 +1,20 @@
-// Strings are owned objects: assignment transfers ownership, copy() makes an
-// independent String, and a String field stays part of its owner (§6.5, §7).
+// Strings follow the same rules as structs: assignment and return transfer
+// ownership, copy() keeps both usable, value parameters receive copies; a
+// literal always creates a new String (§6.5, §7).
 
 const String APP_NAME = "Nirea";
 
 struct Named {
     String name;
+
+    String getName() {
+        return name.copy();
+    }
 }
 
-void show(String* text) {
-    println(text);
+int countWith(String text) {
+    text.append("!");
+    return text.length();
 }
 
 void main() {
@@ -17,18 +23,21 @@ void main() {
     second.append("!");
     println(first);                 // expect: Nirea
     println(second);                // expect: Nirea!
-    show(first);                    // expect: Nirea
 
     String third = second;          // second is no longer accessible
     println(third);                 // expect: Nirea!
-    second = "reused";
+    second = "reused";              // a new object makes it usable again
     println(second);                // expect: reused
 
+    println(countWith(first));      // expect: 6
+    println(first);                 // expect: Nirea
+
     Named named;
-    named.name = first;             // the field becomes the owner
+    named.name = first.copy();
     String fromField = named.name.copy();
     fromField.setCharAt(0, 'J');
     println(fromField);             // expect: Jirea
+    println(named.getName());       // expect: Nirea
+    println(countWith(named.name)); // expect: 6
     println(named.name);            // expect: Nirea
-    println(APP_NAME);              // expect: Nirea
 }

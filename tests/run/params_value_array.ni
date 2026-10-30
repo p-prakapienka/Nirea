@@ -1,4 +1,4 @@
-// Arrays can be passed by value (owned) or by reference (§6.6, §7.3).
+// Arrays can be passed by value (copied) or by reference (§6.6, §7.3).
 
 int sumAndClear(int[3] values) {
     int total = values[0] + values[1] + values[2];
