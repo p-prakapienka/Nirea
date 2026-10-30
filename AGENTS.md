@@ -4,20 +4,58 @@ Guidance for AI coding agents and contributors working in this repository.
 
 ## Project
 
-Nirea is a statically typed, memory-safe, native programming language. Its syntax is inspired by Java and its programming model by C: free functions, structs with methods, interfaces, namespaces, exclusive ownership, and no classes, inheritance or garbage collector. The first compiler will translate Nirea to C and build native executables with GCC or Clang.
+Nirea is a statically typed, memory-safe, native programming language. Its syntax is inspired by Java and its programming model by C: free functions, structs with methods, interfaces, namespaces, exclusive ownership, and no classes, inheritance or garbage collector. The compiler, `nirea`, translates Nirea to C and builds native executables with GCC or Clang.
 
 ## Current state
 
-The project is in **Phase 1: Language definition** (spec §19). There is no compiler, build system or test suite yet. The repository holds only design documentation.
+The project is in **Phase 2: Initial compiler** (spec §19). The compiler implements the language as specified in version 0.3 of the spec.
 
 ```text
 AGENTS.md                  this file
-README.md                  project overview
+README.md                  project overview and usage
+CMakeLists.txt             build for the compiler and tests
+cmake/embed.cmake          embeds the runtime sources into the compiler
 docs/
 └── language-design.md     language design specification (v0.3, preliminary)
+runtime/
+├── nirea_rt.h             runtime header included by generated C
+└── nirea_rt.c             runtime: printing, runtime errors
+src/                       the compiler, in C11
+├── main.c                 command-line interface
+├── driver.c               file loading, imports (§12), invoking the C compiler
+├── lexer.c                tokens
+├── parser.c               syntax tree (Appendix A)
+├── ast.h, types.c         syntax tree and semantic types
+├── sema.c                 name resolution and type checking
+├── ownership.c            flow-sensitive move checking (§7)
+├── codegen.c              C generation
+└── common.c               memory, strings, maps, diagnostics
+tests/
+├── run/                   programs with expected output
+├── errors/                programs that must fail to compile
+├── projects/              multi-file projects
+└── runner/test_runner.c   test runner used by CTest
 ```
 
-Update the layout above and add build/test commands here as code arrives.
+### Build and test
+
+The compiler is written in C11 and built with CMake (3.16 or later). It needs GCC or Clang, both to build it and to compile the C it generates.
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build -j8 --output-on-failure
+```
+
+Run a single program with `build/nirea run path/to/File.ni`. To see the generated C, use `build/nirea build File.ni -o app --emit-c out/`.
+
+### Tests
+
+- `tests/run/NAME.ni`: `// expect: TEXT` comments give the expected stdout lines in order. `// exit: N` sets the expected exit status. `// runtime-error: TEXT` expects a runtime error whose message contains TEXT.
+- `tests/errors/NAME.ni`: mark each line that must get a diagnostic with `// error`, or `// error: TEXT` to also match the message. Any diagnostic on an unmarked line fails the test.
+- `tests/projects/NAME/`: a project with `src/main/nirea/`, plus `expected.txt` for its stdout, or an `expect-error` file if it must fail to compile.
+- CMake picks up new test files when you rebuild.
+- Add a test for every behaviour you add or fix. Prefer one rule per test file.
 
 ## The specification is the source of truth
 
@@ -44,12 +82,15 @@ These rules apply to examples now and to Nirea sources later:
 - Use the `.ni` extension for source files. Project sources live under `src/main/nirea` (§12, §16).
 - Write imports as file paths with forward slashes and an explicit `.ni` extension.
 
-## Compiler work (future)
+## Compiler work
 
 - Follow the pipeline in §13.1: lexer and parser, AST, name and type resolution, ownership and lifetime analysis, C code generation, then GCC/Clang.
 - The compiler must enforce all type, ownership and safety rules before it emits C. Never rely on the C compiler to catch a Nirea rule violation.
 - Keep semantics independent of the backend, so a future LLVM or native backend does not change language behaviour.
-- The compiler's implementation language and build tooling are not chosen yet. Do not pick them as a side effect of another task. Once they are decided, record them here with the build and test commands.
+- Generated C must not depend on unspecified C behaviour. Expressions are lowered to temporaries so evaluation is left to right. Checked arithmetic goes through the `nr_*` helpers in `runtime/nirea_rt.h`.
+- Generated C includes only `nirea_rt.h`, so that user `extern "C"` declarations never clash with system headers. Code that needs the C library belongs in `runtime/nirea_rt.c`.
+- Diagnostics use the format `path:line:col: error: message`. Messages say what is wrong and, where possible, how to fix it.
+- Keep the compiler free of warnings under `-Wall -Wextra`, and keep generated C free of warnings under `-Wall`.
 
 ## Commits
 
