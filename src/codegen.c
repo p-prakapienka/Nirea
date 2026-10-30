@@ -761,6 +761,14 @@ static const char *gen_switch_expr(CG *cg, Expr *e) {
 }
 
 static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
+    if (e->implicit_copy) {
+        /* an existing object copied where it would otherwise transfer (spec 6.5, 7.3) */
+        const char *p = gen_place(cg, e);
+        const char *t = new_tmp(cg);
+        emit(cg, "%s %s = %s;", ctype(e->type), t, copy_expr(e->type, p));
+        add_temp(cg, t, e->type);
+        return t;
+    }
     switch (e->kind) {
     case E_INT: return int_literal(e->type, e->int_value, e->negative);
     case E_FLOAT: return float_literal(e->float_value, e->type == type_f32);

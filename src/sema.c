@@ -1617,9 +1617,43 @@ static const char *place_description(Expr *e) {
  * variable initialiser, assignment, return, value argument, array
  * initialiser element or switch arm. Only whole local variables (including
  * value parameters) and call results can go to a new owner (spec 7.1, 7.3). */
+/* True for expressions that produce a new object nothing else owns. */
+static bool is_new_object(Expr *e) {
+    switch (e->kind) {
+    case E_CALL_FUNC:
+    case E_CALL_METHOD:
+    case E_CALL_IFACE:
+    case E_CALL_CTOR:
+    case E_CALL_STRING:
+    case E_COPY:
+    case E_STRING:
+    case E_CONST:
+    case E_BINARY: return true;
+    default: return false;
+    }
+}
+
+/* Marks existing objects in e to be copied instead of transferred. */
+static void mark_implicit_copy(Expr *e) {
+    if (e->kind == E_SWITCH) {
+        e->transfers_ownership = true; /* the result gets an owner (spec 10.1) */
+        for (int i = 0; i < e->sw->arms.len; i++) {
+            if (e->sw->arms.data[i].expr) mark_implicit_copy(e->sw->arms.data[i].expr);
+        }
+        return;
+    }
+    if (!is_new_object(e)) e->implicit_copy = true;
+}
+
 static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     (void)ctx;
     if (is_error(e->type) || !type_is_owned(e->type)) return;
+    /* Strings always copy, and value parameters receive copies of any
+     * object (spec 6.5, 7.3). */
+    if (e->type == type_string || is_argument) {
+        mark_implicit_copy(e);
+        return;
+    }
     switch (e->kind) {
     case E_VAR:
         if (e->var->kind == VAR_PARAM && e->var->is_ref) {
@@ -1911,6 +1945,10 @@ static void check_switch(Ctx *ctx, SwitchData *sw, Loc loc, bool is_expr, Expr *
         if (result && result->kind == TY_INTERFACE) {
             error_at(loc, "a switch expression can't produce an interface value");
             result = type_error;
+        }
+        if (result == type_string) {
+            /* branches that are existing strings are copied (spec 10.1) */
+            for (int i = 0; i < sw->arms.len; i++) mark_implicit_copy(sw->arms.data[i].expr);
         }
         e->type = result ? result : type_error;
     }

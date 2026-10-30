@@ -5,7 +5,7 @@
 
 #include "driver.h"
 
-#define NIREA_VERSION "0.8.0"
+#define NIREA_VERSION "0.9.0"
 
 static void usage(FILE *f) {
     fprintf(f,

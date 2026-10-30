@@ -1,4 +1,4 @@
-// A String value parameter owns its object; a String* parameter changes the caller's (§7.3).
+// A String value parameter is a copy; a String* parameter changes the caller's string (§6.5, §7.3).
 
 String shout(String text) {
     text.appendChar('!');

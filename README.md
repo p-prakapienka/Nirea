@@ -26,7 +26,7 @@ void main() {
 
 ## Status
 
-Nirea is at an early stage. The first compiler, `nirea`, implements version 0.8 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.9 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
 
 ## Building the compiler
 
@@ -58,5 +58,5 @@ Options:
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.8, preliminary)
+- [Language design specification](docs/language-design.md) (v0.9, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors
