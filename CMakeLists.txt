@@ -35,9 +35,12 @@ add_executable(nirea
     src/ownership.c
     src/codegen.c
     src/driver.c
+    src/platform.c
     ${EMBEDDED_RUNTIME})
 target_include_directories(nirea PRIVATE src)
-target_compile_definitions(nirea PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+if(NOT WIN32)
+    target_compile_definitions(nirea PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+endif()
 
 install(TARGETS nirea RUNTIME DESTINATION bin)
 

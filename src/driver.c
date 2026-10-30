@@ -2,14 +2,10 @@
  * and invokes the C compiler (spec 13). */
 #include "driver.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include "ast.h"
 #include "codegen.h"
@@ -34,12 +30,17 @@ static bool ends_with(const char *s, const char *suffix) {
     return ls >= lx && strcmp(s + ls - lx, suffix) == 0;
 }
 
-/* Removes "./" segments and collapses "dir/../" for nicer display paths. */
+/* Removes "./" segments and collapses "dir/../" for nicer display paths,
+ * which always use '/'. */
 static char *clean_path(const char *path) {
     StrVec parts = {0};
-    bool absolute = path[0] == '/';
-    char *copy = xstrdup(path);
-    for (char *tok = strtok(copy, "/"); tok; tok = strtok(NULL, "/")) {
+    bool absolute = is_path_separator(path[0]);
+    for (const char *p = path; *p;) {
+        while (is_path_separator(*p)) p++;
+        const char *start = p;
+        while (*p && !is_path_separator(*p)) p++;
+        if (p == start) break;
+        char *tok = xstrndup(start, (size_t)(p - start));
         if (strcmp(tok, ".") == 0) continue;
         if (strcmp(tok, "..") == 0 && parts.len > 0 && strcmp(parts.data[parts.len - 1], "..") != 0) {
             parts.len--;
@@ -79,15 +80,8 @@ static SourceFile *load_file(Loader *ld, const char *display_path) {
 }
 
 static void collect_sources(Loader *ld, const char *dir, StrVec *out) {
-    DIR *d = opendir(dir);
-    if (!d) return;
     StrVec names = {0};
-    struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
-        if (ent->d_name[0] == '.') continue;
-        vec_push(names, xstrdup(ent->d_name));
-    }
-    closedir(d);
+    if (!list_dir(dir, &names)) return;
     /* sort for deterministic output */
     for (int i = 1; i < names.len; i++) {
         for (int j = i; j > 0 && strcmp(names.data[j - 1], names.data[j]) > 0; j--) {
@@ -115,7 +109,7 @@ static void resolve_imports(Loader *ld, SourceFile *f) {
             error_at(imp->loc, "import paths use forward slashes: '%s'", p);
             continue;
         }
-        if (p[0] == '/') {
+        if (path_is_absolute(p)) {
             error_at(imp->loc, "import paths must be relative to the source root or the importing file: '%s'", p);
             continue;
         }
@@ -160,54 +154,11 @@ static bool write_runtime(const char *dir) {
            write_file(path_join(dir, "nirea_rt.c"), (const char *)nirea_rt_c_data, nirea_rt_c_size);
 }
 
-int run_process(const char *const *argv) {
-    fflush(stdout);
-    fflush(stderr);
-    pid_t pid = fork();
-    if (pid < 0) {
-        fprintf(stderr, "nirea: error: can't start %s: %s\n", argv[0], strerror(errno));
-        return 127;
-    }
-    if (pid == 0) {
-        execvp(argv[0], (char *const *)argv);
-        fprintf(stderr, "nirea: error: can't run %s: %s\n", argv[0], strerror(errno));
-        _exit(127);
-    }
-    int status;
-    while (waitpid(pid, &status, 0) < 0) {
-        if (errno != EINTR) return 127;
-    }
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return 1;
-}
-
-void remove_dir_tree(const char *dir) {
-    DIR *d = opendir(dir);
-    if (d) {
-        struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
-            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
-            char *path = path_join(dir, ent->d_name);
-            if (dir_exists(path)) remove_dir_tree(path);
-            else remove(path);
-        }
-        closedir(d);
-    }
-    rmdir(dir);
-}
-
-static char *make_temp_dir(void) {
-    const char *base = getenv("TMPDIR");
-    if (!base || !*base) base = "/tmp";
-    char *templ = path_join(base, "nirea-XXXXXX");
-    if (!mkdtemp(templ)) fatal("can't create a temporary directory in %s: %s", base, strerror(errno));
-    return templ;
-}
-
 static char *file_stem(const char *path) {
-    const char *slash = strrchr(path, '/');
-    const char *name = slash ? slash + 1 : path;
+    const char *name = path;
+    for (const char *p = path; *p; p++) {
+        if (is_path_separator(*p)) name = p + 1;
+    }
     size_t len = strlen(name);
     if (ends_with(name, ".ni")) len -= 3;
     return xstrndup(name, len);
@@ -271,7 +222,7 @@ int nirea_build(BuildOptions *opts, char **exe_out, char **temp_dir_out) {
     if (project_dir) {
         char *target = path_join(project_dir, "target");
         c_dir = opts->emit_c_dir ? xstrdup(opts->emit_c_dir) : path_join(target, "generated-c");
-        exe = opts->output ? xstrdup(opts->output) : path_join(target, "nirea-app");
+        exe = executable_path(opts->output ? opts->output : path_join(target, "nirea-app"));
     } else {
         /* Single file: generated C goes to a temporary directory unless
          * --emit-c is given; the executable goes to -o, else the current
@@ -283,9 +234,9 @@ int nirea_build(BuildOptions *opts, char **exe_out, char **temp_dir_out) {
             *temp_dir_out = tmp;
         }
         c_dir = opts->emit_c_dir ? xstrdup(opts->emit_c_dir) : path_join(tmp, "c");
-        if (opts->output) exe = xstrdup(opts->output);
-        else if (exe_in_temp) exe = path_join(tmp, file_stem(input));
-        else exe = file_stem(input);
+        if (opts->output) exe = executable_path(opts->output);
+        else if (exe_in_temp) exe = executable_path(path_join(tmp, file_stem(input)));
+        else exe = executable_path(file_stem(input));
     }
     if (!make_dirs(c_dir)) {
         fprintf(stderr, "nirea: error: can't create directory %s\n", c_dir);
@@ -302,11 +253,13 @@ int nirea_build(BuildOptions *opts, char **exe_out, char **temp_dir_out) {
         return 1;
     }
 
-    const char *cc = opts->cc;
-    if (!cc) cc = getenv("CC");
-    if (!cc || !*cc) cc = "cc";
+    /* the C compiler: --cc, then $CC, then the usual ones for the platform */
+    const char *chosen = opts->cc;
+    if (!chosen) chosen = getenv("CC");
+    const char *const given[] = {chosen, NULL};
+    const char *const *compilers = chosen && *chosen ? given : default_c_compilers();
     StrVec argv = {0};
-    vec_push(argv, cc);
+    vec_push(argv, compilers[0]);
     vec_push(argv, "-std=c11");
     vec_push(argv, "-O2");
     vec_push(argv, "-o");
@@ -318,12 +271,31 @@ int nirea_build(BuildOptions *opts, char **exe_out, char **temp_dir_out) {
     if (extra) {
         for (char *tok = strtok(xstrdup(extra), " \t"); tok; tok = strtok(NULL, " \t")) vec_push(argv, tok);
     }
-    vec_push(argv, "-lm");
+    if (math_library_flag()) vec_push(argv, math_library_flag());
     vec_push(argv, NULL);
-    int status = run_process(argv.data);
-    if (status != 0) {
-        fprintf(stderr, "nirea: error: the C compiler (%s) failed with status %d\n", cc, status);
-        return 1;
+    for (int i = 0; compilers[i]; i++) {
+        argv.data[0] = compilers[i];
+        int status;
+        bool started = run_process(argv.data, &status);
+        if (!started && errno == ENOENT && compilers[i + 1]) continue; /* not installed: try the next */
+        if (!started && errno == ENOENT && compilers != given) {
+            StrBuf tried = {0};
+            for (int k = 0; compilers[k]; k++) sb_printf(&tried, "%s%s", k ? ", " : "", compilers[k]);
+            fprintf(stderr,
+                    "nirea: error: no C compiler found (tried %s); install GCC or Clang, or name one with --cc or "
+                    "the CC environment variable\n",
+                    sb_cstr(&tried));
+            return 1;
+        }
+        if (!started) {
+            fprintf(stderr, "nirea: error: can't run the C compiler '%s': %s\n", compilers[i], strerror(errno));
+            return 1;
+        }
+        if (status != 0) {
+            fprintf(stderr, "nirea: error: the C compiler (%s) failed with status %d\n", compilers[i], status);
+            return 1;
+        }
+        break;
     }
     *exe_out = exe;
     return 0;

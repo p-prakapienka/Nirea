@@ -233,6 +233,18 @@ cmake --build build
 ctest --test-dir build -j8      # run the test suite
 ```
 
+### Windows
+
+Install CMake and a MinGW-w64 toolchain: GCC (for example from MSYS2 or WinLibs) or Clang (for example llvm-mingw). With GCC:
+
+```sh
+cmake -S . -B build -G "MinGW Makefiles"
+cmake --build build
+ctest --test-dir build -j8
+```
+
+The compiler is `build\nirea.exe`. It needs GCC or Clang on `PATH` to build programs too, because it compiles the C it generates with them. Microsoft's C compiler (`cl.exe`) isn't supported.
+
 ## Using the compiler
 
 ```sh
@@ -242,13 +254,13 @@ nirea build path/to/project           # build a project into target/
 nirea check path/to/project           # check without building
 ```
 
-A project keeps its sources in `src/main/nirea`. `nirea build` writes the generated C to `target/generated-c/` and the executable to `target/nirea-app`. When you build a single file, the compiler also loads the files it imports.
+A project keeps its sources in `src/main/nirea`. `nirea build` writes the generated C to `target/generated-c/` and the executable to `target/nirea-app` (`nirea-app.exe` on Windows, where executables always get `.exe`). When you build a single file, the compiler also loads the files it imports.
 
 Options:
 
 - `-o FILE` sets the executable path.
 - `--emit-c DIR` keeps the generated C in `DIR`.
-- `--cc COMPILER` selects the C compiler; the default is `$CC`, then `cc`.
+- `--cc COMPILER` selects the C compiler. The default is `$CC`, then `cc`; on Windows, `$CC`, then `gcc`, then `clang`.
 - `-lLIB` and `-LDIR` are passed to the C compiler, for example to link C libraries used through `extern "C"`.
 
 ## Documentation

@@ -23,6 +23,7 @@ runtime/
 src/                       the compiler, in C11
 ├── main.c                 command-line interface
 ├── driver.c               file loading, imports (§12), invoking the C compiler
+├── platform.c             paths, directories and processes on POSIX and Windows
 ├── lexer.c                tokens
 ├── parser.c               syntax tree (Appendix A)
 ├── ast.h, types.c         syntax tree and semantic types
@@ -48,6 +49,8 @@ ctest --test-dir build -j8 --output-on-failure
 ```
 
 Run a single program with `build/nirea run path/to/File.ni`. To see the generated C, use `build/nirea build File.ni -o app --emit-c out/`.
+
+On Windows, configure with `cmake -S . -B build -G "MinGW Makefiles"` and a MinGW-w64 GCC or Clang on `PATH`; the README has the details.
 
 ### Tests
 
@@ -92,6 +95,7 @@ These rules apply to examples now and to Nirea sources later:
 - Diagnostics use the format `path:line:col: error: message`. Messages say what is wrong and, where possible, how to fix it.
 - Owned objects that hold heap memory (strings, and structs and arrays containing them) are destroyed automatically by the generated code (§7.6). See the comment at the top of `src/codegen.c`. After changing code generation, run the suite with `NIREA_CFLAGS="-fsanitize=address,undefined" ctest --test-dir build -j8` to catch leaks, double frees and undefined behaviour.
 - Keep the compiler free of warnings under `-Wall -Wextra`, and keep generated C free of warnings under `-Wall`.
+- The compiler runs on POSIX systems and Windows. Code that depends on the operating system (paths, directories, processes) belongs in `src/platform.c`; the rest of the compiler stays portable C11.
 
 ## Commits
 
