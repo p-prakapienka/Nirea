@@ -692,6 +692,17 @@ static const char *gen_binary(CG *cg, Expr *e) {
         return t;
     }
     Type *lt = e->base->type;
+    if (op == TOK_IS) {
+        /* identity: both operands are references (spec 6.10) */
+        if (lt->kind == TY_INTERFACE) {
+            const char *l = gen_expr(cg, e->base);
+            const char *r = gen_expr(cg, e->index);
+            return fmt_str("(%s.self == %s.self)", l, r);
+        }
+        const char *l = gen_ref(cg, e->base);
+        const char *r = gen_ref(cg, e->index);
+        return fmt_str("((const void *)%s == (const void *)%s)", l, r);
+    }
     if ((op == TOK_EQ || op == TOK_NE) && type_is_owned(lt)) {
         const char *l = gen_lvalue(cg, e->base);
         const char *r = gen_lvalue(cg, e->index);

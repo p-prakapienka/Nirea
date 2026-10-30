@@ -1288,6 +1288,21 @@ static void check_operands(Ctx *ctx, Expr *e, Type *hint) {
     }
 }
 
+/* A reference is a T* parameter, `this`, or an alias of either (spec 6.9). */
+static bool is_reference(Expr *e) {
+    switch (e->kind) {
+    case E_VAR: return e->var->kind == VAR_PARAM && e->var->is_ref;
+    case E_THIS: return true;
+    case E_ALIAS: return is_reference(e->alias->expr);
+    default: return false;
+    }
+}
+
+static const char *reference_name(Expr *e) {
+    while (e->kind == E_ALIAS) e = e->alias->expr;
+    return e->kind == E_THIS ? "this" : fmt_str("'%s'", e->var->name);
+}
+
 static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
     int op = e->op;
     const char *opname = token_kind_name(op);
@@ -1301,11 +1316,36 @@ static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
         coerce(&e->index, type_bool, fmt_str("right operand of '%s'", opname));
         return set_type(e, type_bool);
     }
+    case TOK_IS: {
+        Type *lt = check_value(ctx, e->base, NULL);
+        Type *rt = check_value(ctx, e->index, NULL);
+        if (is_error(lt) || is_error(rt)) return set_type(e, type_bool);
+        for (int side = 0; side < 2; side++) {
+            Expr *operand = side ? e->index : e->base;
+            if (!is_reference(operand)) {
+                error_at(operand->loc,
+                         "'is' compares references (T* parameters or this), but this is a value; compare values with '=='");
+                return set_type(e, type_bool);
+            }
+        }
+        if (lt != rt) error_at(e->loc, "'is' needs two references of the same type, found %s and %s", type_name(lt), type_name(rt));
+        return set_type(e, type_bool);
+    }
     case TOK_EQ:
     case TOK_NE: {
         check_operands(ctx, e, NULL);
         Type *lt = e->base->type, *rt = e->index->type;
         if (is_error(lt) || is_error(rt)) return set_type(e, type_bool);
+        for (int side = 0; side < 2; side++) {
+            Expr *operand = side ? e->index : e->base;
+            if (is_reference(operand)) {
+                error_at(operand->loc,
+                         "%s is a reference and can't be compared with '%s'; use 'is' to check whether two references "
+                         "point to the same object, or compare their fields",
+                         reference_name(operand), opname);
+                return set_type(e, type_bool);
+            }
+        }
         if (type_is_numeric(lt) && type_is_numeric(rt)) {
             common_numeric(e, lt, rt, opname);
             return set_type(e, type_bool);
@@ -1664,6 +1704,11 @@ static void check_switch(Ctx *ctx, SwitchData *sw, Loc loc, bool is_expr, Expr *
         else if (st == type_string) sw->kind = SW_STRING;
         else {
             error_at(sw->subject->loc, "can't switch on a value of type %s", type_name(st));
+            bad = true;
+        }
+        if (!bad && is_reference(sw->subject)) {
+            error_at(sw->subject->loc, "can't switch on reference %s; a switch compares its subject with values",
+                     reference_name(sw->subject));
             bad = true;
         }
     }

@@ -12,10 +12,6 @@ struct Point {
     }
 }
 
-boolean same(Point* a, Point* b) {
-    return a == b;
-}
-
 void main() {
     String a = "abc";
     String b = "ab";
@@ -28,7 +24,6 @@ void main() {
     println(p == q);                     // expect: true
     q.label.appendChar('!');
     println(p == q);                     // expect: false
-    println(same(p, p));                 // expect: true
 
     int[3] xs = {1, 2, 3};
     int[3] ys = {1, 2, 3};

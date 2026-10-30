@@ -479,7 +479,8 @@ static int binary_precedence(TokenKind kind) {
     case TOK_CARET: return 4;
     case TOK_AMP: return 5;
     case TOK_EQ:
-    case TOK_NE: return 6;
+    case TOK_NE:
+    case TOK_IS: return 6;
     case TOK_LT:
     case TOK_LE:
     case TOK_GT:
