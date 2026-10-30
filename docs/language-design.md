@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.5 — Strings as objects, automatic cleanup and structural equality
+**Version:** 0.6 — Reference identity
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -404,7 +404,28 @@ A local variable declared without an initialiser holds its type's zero value, ex
 - Structs compare their fields, in declaration order, with `==`.
 - Arrays compare their elements, in order, with `==`.
 
-Both operands must have the same type, after implicit conversion for numbers (§6.2). There is no comparison of object identity or memory addresses: references can't be compared, so comparing through reference parameters compares the objects they refer to. Interface values can't be compared with `==`.
+Both operands must be values of the same type, after implicit conversion for numbers (§6.2).
+
+A reference (a `T*` parameter, `this`, or an alias of either) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. What a reference reaches is a value: compare its fields (`a.x == b.x`), or use `is` to check whether two references point to the same object (§6.10).
+
+### 6.10 Identity
+
+`a is b` is `true` when the references `a` and `b` point to the same object in memory.
+
+```nirea
+boolean sameEngine(Engine* a, Engine* b) {
+    return a is b;
+}
+
+void main() {
+    Engine first = Engine(100);
+    Engine second = Engine(100);
+    println(sameEngine(first, first));    // true
+    println(sameEngine(first, second));   // false: equal values, different objects
+}
+```
+
+Both operands of `is` must be references of the same type. A value can't be an operand of `is`. The negation is written `!(a is b)`.
 
 ## 7. Ownership and memory safety
 
@@ -706,7 +727,7 @@ switch (state) {
 }
 ```
 
-An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values.
+An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values. A switch compares its subject with the case values, so the subject must be a value, not a reference (§6.9).
 
 A switch expression of a struct, array or `String` type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element, `this` or alias), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls or string literals, can be used anywhere.
 
@@ -1195,7 +1216,7 @@ andExpr        = bitOrExpr { "&&" bitOrExpr } ;
 bitOrExpr      = bitXorExpr { "|" bitXorExpr } ;
 bitXorExpr     = bitAndExpr { "^" bitAndExpr } ;
 bitAndExpr     = equalityExpr { "&" equalityExpr } ;
-equalityExpr   = relationalExpr { ( "==" | "!=" ) relationalExpr } ;
+equalityExpr   = relationalExpr { ( "==" | "!=" | "is" ) relationalExpr } ;
 relationalExpr = shiftExpr { ( "<" | "<=" | ">" | ">=" ) shiftExpr } ;
 shiftExpr      = additiveExpr { ( "<<" | ">>" ) additiveExpr } ;
 additiveExpr   = multiplicativeExpr { ( "+" | "-" ) multiplicativeExpr } ;
