@@ -1061,7 +1061,7 @@ static Type *call_decl(Ctx *ctx, Expr *e, Decl *d) {
 }
 
 /* Built-in String methods (spec 6.5). Parameter kinds: 'i' int, 'c' char,
- * 's' String reference. */
+ * 's' String. All parameters are values. */
 typedef struct StringMethod {
     const char *name;
     const char *params;

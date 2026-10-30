@@ -502,6 +502,9 @@ static const char *gen_string_call(CG *cg, Expr *e, bool want_value) {
     StrBuf args = {0};
     for (int i = 0; i < e->args.len; i++) {
         Expr *arg = e->args.data[i];
+        /* String arguments are value parameters (spec 6.5), but the methods
+         * only read them, so the original is used in place, which behaves the
+         * same as a copy; the runtime handles s.append(s). */
         if (arg->type == type_string) sb_printf(&args, ", %s", gen_ref(cg, arg));
         else if (type_is_integer(arg->type)) sb_printf(&args, ", (int64_t)%s", gen_expr(cg, arg));
         else sb_printf(&args, ", %s", gen_expr(cg, arg));
@@ -831,6 +834,8 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
         return fmt_str("%lld", (long long)e->base->type->length);
     }
     case E_EQUALS: {
+        /* the argument is a value parameter (spec 6.9), but it is only read,
+         * so it is compared in place rather than copied */
         const char *a = gen_lvalue(cg, e->base);
         const char *b = gen_lvalue(cg, e->args.data[0]);
         return eq_expr(e->base->type, a, b);
