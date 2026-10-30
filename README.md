@@ -26,9 +26,37 @@ void main() {
 
 ## Status
 
-Nirea is in the language-definition phase. There is no compiler yet; the first one is planned to translate Nirea to C and build native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.7 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+
+## Building the compiler
+
+You need CMake 3.16 or later and GCC or Clang.
+
+```sh
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build -j8      # run the test suite
+```
+
+## Using the compiler
+
+```sh
+nirea run Hello.ni                    # build and run a single file
+nirea build Hello.ni -o hello         # build an executable
+nirea build path/to/project           # build a project into target/
+nirea check path/to/project           # check without building
+```
+
+A project keeps its sources in `src/main/nirea`. `nirea build` writes the generated C to `target/generated-c/` and the executable to `target/nirea-app`. When you build a single file, the compiler also loads the files it imports.
+
+Options:
+
+- `-o FILE` sets the executable path.
+- `--emit-c DIR` keeps the generated C in `DIR`.
+- `--cc COMPILER` selects the C compiler; the default is `$CC`, then `cc`.
+- `-lLIB` and `-LDIR` are passed to the C compiler, for example to link C libraries used through `extern "C"`.
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.2, preliminary)
+- [Language design specification](docs/language-design.md) (v0.7, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors
