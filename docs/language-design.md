@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.4 — Value and reference parameters
+**Version:** 0.5 — Strings as objects, automatic cleanup and structural equality
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -222,7 +222,7 @@ const int MAX_BUFFER_SIZE = 1024;
 const String APP_NAME = "Nirea";
 ```
 
-A constant has a primitive, enum or `String` type. Its initialiser is a literal, a negated numeric literal or an enum value.
+A constant has a primitive, enum or `String` type. Its initialiser is a literal, a negated numeric literal or an enum value. A `String` constant is a named literal: each use creates a new `String` object, like writing the literal (§6.5).
 
 There are no global variables. Mutable state lives in local variables and in the values they own.
 
@@ -303,8 +303,10 @@ Integer overflow is a runtime error. So are:
 - integer division or remainder by zero;
 - dividing the smallest value of a signed type by `-1`, which overflows (the remainder of that division is `0`, not an error);
 - shifting by a negative amount, or by at least the width of the shifted type;
-- an array index out of range (§6.6);
-- an invalid float-to-integer cast (§6.2).
+- an array or string index out of range (§6.5, §6.6);
+- an invalid float-to-integer cast (§6.2);
+- text that `toInt`, `toInt64` or `toFloat64` can't parse (§6.5);
+- running out of memory.
 
 A runtime error stops the program immediately, with a message naming the error and its source location and a non-zero exit status. It can't be caught; recoverable error handling is an open question (§18).
 
@@ -314,9 +316,42 @@ Floating-point arithmetic follows IEEE 754: division or remainder by zero produc
 
 ### 6.5 Strings
 
-`String` is a built-in, immutable string type. In this version a `String` value is always a string literal, or a constant initialised from one: a fixed sequence of bytes in static storage. Strings aren't owned, so like primitive values they're copied when assigned or passed.
+`String` is a built-in object type holding a sequence of bytes. Like a struct, a `String` is owned (§7): assigning it, returning it or passing it to a value parameter transfers ownership, a `String*` parameter refers to it in place, and `copy()` creates an independent copy. A `String` field or array element is part of its owner.
 
-`==` and `!=` compare string contents. Strings can be printed (§15) and passed to C functions (§14). Building, concatenating and inspecting strings is left to a future library (§15, §18).
+A string literal such as `"text"` creates a new `String` object each time it is evaluated. A `String` can be changed through its methods; changes never affect other `String` objects.
+
+```nirea
+String greeting = "Hello";
+greeting.append(", Nirea");
+greeting.appendChar('!');
+println(greeting);                 // Hello, Nirea!
+
+String copy = greeting.copy();
+copy.setCharAt(0, 'J');
+println(greeting.charAt(0));       // H
+```
+
+Built-in methods:
+
+| Method                               | Result                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| `int length()`                       | The number of bytes                                                      |
+| `char charAt(int index)`             | The byte at `index`                                                      |
+| `void setCharAt(int index, char c)`  | Replaces the byte at `index`                                             |
+| `void append(String* text)`          | Adds the bytes of `text` at the end                                      |
+| `void appendChar(char c)`            | Adds one byte at the end                                                 |
+| `String substring(int from, int to)` | A new `String` with the bytes from `from` up to, but not including, `to` |
+| `int indexOf(String* text)`          | The first index where `text` occurs, or `-1`; `0` for an empty `text`    |
+| `int toInt()`                        | The text parsed as an `int`                                              |
+| `int64 toInt64()`                    | The text parsed as an `int64`                                            |
+| `float64 toFloat64()`                | The text parsed as a `float64`                                           |
+| `String copy()`                      | An independent copy (§7.2)                                               |
+
+`String.of(value)` creates a new `String` from a value of a primitive or enum type, with the same text `print` would write (§15): `String.of(42)` is `"42"`.
+
+An index outside the string (for `charAt` and `setCharAt`, outside `0` to `length() - 1`; for `substring`, unless `0 <= from <= to <= length()`) is a runtime error, as for arrays (§6.4). `toInt`, `toInt64` and `toFloat64` accept an optional `-` or `+` followed by a decimal number, with a fractional part and exponent only for `toFloat64` (which also accepts `NaN`, `Infinity` and `-Infinity`). Anything else, including a value out of range for the type, is a runtime error.
+
+Strings can be compared with `==` (§6.9), printed (§15) and passed to C functions (§14). `+` doesn't concatenate strings; use `append`.
 
 ### 6.6 Arrays
 
@@ -360,13 +395,24 @@ Every type has a zero value: `0` for numbers, `false` for `boolean`, `'\0'` for 
 
 A local variable declared without an initialiser holds its type's zero value, except for struct types that declare a constructor (§5.4). Struct fields and array elements always start at their zero value, even when their struct type declares a constructor. No value can be read uninitialised.
 
+### 6.9 Equality
+
+`==` and `!=` compare values by their structure:
+
+- Numbers, `char`, `boolean` and enum values compare their values. Floating-point comparison follows IEEE 754, so NaN is not equal to itself.
+- Strings compare their bytes.
+- Structs compare their fields, in declaration order, with `==`.
+- Arrays compare their elements, in order, with `==`.
+
+Both operands must have the same type, after implicit conversion for numbers (§6.2). There is no comparison of object identity or memory addresses: references can't be compared, so comparing through reference parameters compares the objects they refer to. Interface values can't be compared with `==`.
+
 ## 7. Ownership and memory safety
 
 Memory safety is one of Nirea's fundamental design principles.
 
 Nirea uses exclusive ownership: every owned object has exactly one owner at a time.
 
-Values of struct and array types are owned. Values of primitive types, enums and `String` are plain values: assigning or passing them copies them, and the ownership rules below don't apply to them.
+Values of struct, array and `String` types are owned objects. Values of primitive types and enums are plain values: assigning or passing them copies them, and the ownership rules below don't apply to them.
 
 The owner of a value is a local variable, a field of another owned value, or an element of an owned array.
 
@@ -421,11 +467,11 @@ Engine second = first.copy();
 
 `copy()` creates an independent object.
 
-`copy()` is built in for every struct and array type, and makes a deep copy: owned fields and elements are copied too. A struct can't declare its own method named `copy`; type-defined copying is an open question (§18).
+`copy()` is built in for every struct, array and `String` type, and makes a deep copy: owned fields and elements are copied too. A struct can't declare its own method named `copy`; type-defined copying is an open question (§18).
 
 ### 7.3 Passing values and references
 
-A struct or array parameter is either a value or a reference.
+A struct, array or `String` parameter is either a value or a reference.
 
 A **value parameter**, written `Engine engine`, is an object of its own in the called function's memory. The argument's contents are placed there, and the function owns that object. Inside the function, a value parameter is an owned local variable: it can be modified, assigned, returned, stored in a field or passed on by value. Changes to it aren't visible to the caller.
 
@@ -476,9 +522,9 @@ void setEngine(Engine* engine) {
 }
 ```
 
-`T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the object it refers to. Only struct, array and interface types can be passed by reference. Interface parameters must be references (§5.3).
+`T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the object it refers to. Only struct, array, `String` and interface types can be passed by reference. Interface parameters must be references (§5.3).
 
-The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. A call can't take a local by value while also referring to it through the receiver or a reference parameter. Parameters of primitive types, enums and `String` are always passed by value. They are local copies, and the function can assign to them.
+The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. A call can't take a local by value while also referring to it through the receiver or a reference parameter. Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
 
 The method receiver `this` is a reference to the object the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
 
@@ -512,7 +558,7 @@ The previous object must be properly destroyed, including its owned resources.
 
 The compiler must prevent invalid outstanding references.
 
-In this version no type owns memory or operating-system resources, so destroying a value has no observable effect (§7.6).
+Assigning a new object to a variable, field or array element destroys the object it held before (§7.6), after the new value has been evaluated.
 
 ### 7.6 Resource lifecycle
 
@@ -526,7 +572,16 @@ The lifecycle system must account for:
 - Operating-system resources.
 - Native resources acquired through C libraries.
 
-Destructor syntax and execution order remain to be specified. Until they are, all values are plain data: no type can own allocated memory, file handles or other resources.
+Every owned object is destroyed exactly once, automatically, when its owner ends. Destroying an object releases what it owns: a `String` frees its bytes, and a struct or array destroys its fields or elements.
+
+- A local variable, including a value parameter, ends when control leaves its block: at the end of the block, or through `return`, `break` or `continue`. Locals are destroyed in reverse order of declaration. A variable that has transferred ownership of its object doesn't destroy it.
+- A field or array element ends with the object that contains it. Fields are destroyed in reverse order of declaration, and array elements from the last to the first.
+- An object assigned to a variable, field or element replaces the old object, which is destroyed (§7.5).
+- An object that nothing owns, such as a call result used only as an argument for a reference parameter (`inspect(createEngine())`) or as a method receiver, is destroyed at the end of the statement that created it.
+
+A runtime error (§6.4) ends the program immediately, without destroying objects.
+
+User-defined destructors, for structs that hold resources such as file handles, remain to be specified (§18).
 
 ## 8. Struct encapsulation
 
@@ -653,7 +708,9 @@ switch (state) {
 
 An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values.
 
-A switch expression of a struct or array type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element, `this` or alias), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls, can be used anywhere. `break` and `continue` inside a switch arm apply to the enclosing loop.
+A switch expression of a struct, array or `String` type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element, `this` or alias), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls or string literals, can be used anywhere.
+
+`break` and `continue` inside a switch arm apply to the enclosing loop.
 
 ### 10.2 Exhaustiveness
 
@@ -880,7 +937,7 @@ An `extern "C"` block declares C functions that Nirea code can call. It can appe
 
 ```nirea
 extern "C" {
-    int printf(String format, ...);
+    int printf(String* format, ...);
     float64 sqrt(float64 x);
 }
 
@@ -890,7 +947,7 @@ void main() {
 }
 ```
 
-Parameter types can be primitive types and `String`. Return types can be primitive types or `void`. A final `...` declares a variadic function; variadic arguments must be primitives or strings. Types map to C as follows:
+Parameter types can be primitive types and `String*`. A `String*` parameter gives the C function a pointer to the string's bytes, followed by a null byte, for the duration of the call; the string stays with its owner. Return types can be primitive types or `void`. A final `...` declares a variadic function; variadic arguments must be primitives or strings, and strings are passed like `String*`. Types map to C as follows:
 
 | Nirea                               | C                                             |
 | ----------------------------------- | --------------------------------------------- |
@@ -899,7 +956,7 @@ Parameter types can be primitive types and `String`. Return types can be primiti
 | `int8`, `int16`, `int`, `int64`     | `int8_t`, `int16_t`, `int32_t`, `int64_t`     |
 | `uint8`, `uint16`, `uint`, `uint64` | `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t` |
 | `float`, `float64`                  | `float`, `double`                             |
-| `String`                            | `const char *`, null-terminated               |
+| `String*`                           | `const char *`, null-terminated               |
 | `void`                              | `void`                                        |
 
 A C function can't be named `main` or a C keyword, and names starting with `nr_`, or with `nr` or `nri` followed by a digit, are reserved for the compiler's generated code.
@@ -944,7 +1001,7 @@ Potential areas:
 
 The compiler and runtime should remain as small as reasonably possible.
 
-Until a standard library exists, the compiler provides two built-in functions for output: `print(value)` and `println(value)`. They accept one value of a primitive, enum or `String` type, and `println()` with no argument prints an empty line. Values print as follows:
+Until a standard library exists, the compiler provides two built-in functions for output: `print(value)` and `println(value)`. They accept one value of a primitive, enum or `String` type, and `println()` with no argument prints an empty line. A `String` argument is used in place, like a `String*` parameter. Values print as follows:
 
 - Integers print in decimal, and `boolean` values as `true` or `false`.
 - A `char` prints as its byte.
@@ -1001,12 +1058,12 @@ The following decisions require further specification.
 | References  | Whether read-only references are needed once types can own heap resources, and whether primitive values can be passed by reference (`int*`) |
 | Lifetimes   | How references stored inside structs would be checked, if they are allowed                                                                  |
 | Copying     | Type-defined copy behaviour                                                                                                                 |
-| Destruction | Destructor syntax and execution order                                                                                                       |
+| Destruction | User-defined destructors for structs that hold resources such as file handles                                                               |
 | Mutability  | How is object mutation distinguished from field replacement?                                                                                |
 | Overloading | Whether functions, methods and constructors can be overloaded                                                                               |
 | Generics    | Whether generics are included initially                                                                                                     |
 | Enums       | Variants with associated data                                                                                                               |
-| Strings     | Owned, growable strings and text processing                                                                                                 |
+| Strings     | Text processing beyond the built-in `String` methods, and Unicode text                                                                      |
 | Arrays      | Dynamically sized arrays and slices                                                                                                         |
 | FFI         | Struct, array, pointer and callback types at the C boundary                                                                                 |
 | Modules     | Per-file private declarations, and reopening a namespace in several places                                                                  |
@@ -1105,7 +1162,7 @@ constValue     = [ "-" ] literal | typeName "." IDENT ;
 externBlock    = "extern" STRING "{" { externFunction } "}" ;
 externFunction = returnType IDENT "(" [ externParams ] ")" ";" ;
 externParams   = "..." | externParam { "," externParam } [ "," "..." ] ;
-externParam    = type IDENT ;
+externParam    = type [ "*" ] IDENT ;                      (* "*" only for String *)
 
 type           = baseType { "[" arraySize "]" } ;
 baseType       = primitiveType | "String" | typeName ;
@@ -1148,7 +1205,8 @@ unaryExpr      = ( "-" | "!" | "~" ) unaryExpr
                | postfixExpr ;
 postfixExpr    = primary { "." IDENT | "[" expr "]" | "(" [ args ] ")" } ;
 args           = expr { "," expr } ;
-primary        = literal | IDENT | "this" | "(" expr ")" | switchExpr ;
+primary        = literal | IDENT | "this" | "(" expr ")" | switchExpr
+               | "String" "." IDENT ;                                   (* String.of *)
 switchExpr     = "switch" "(" expr ")" "{" { switchLabel "->" expr ";" } "}" ;
 literal        = INTEGER | FLOAT | CHARACTER | STRING | "true" | "false" ;
 ```
