@@ -1,4 +1,4 @@
-// Using a variable after its value has been moved is rejected (§7.1).
+// Using a variable after it has transferred ownership of its object is rejected (§7.1).
 
 struct Engine {
     int power;

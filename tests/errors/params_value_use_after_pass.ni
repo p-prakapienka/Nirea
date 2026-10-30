@@ -1,4 +1,4 @@
-// Passing a local by value moves it; the caller can't use it afterwards (§7.3).
+// Passing a local by value transfers ownership; the caller can't use it afterwards (§7.3).
 
 struct Engine {
     int power;

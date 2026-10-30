@@ -1,4 +1,4 @@
-// A variable moved on some path is usable again once every path that moved it
+// A variable that gave its object away on some path is usable again once every such path
 // has assigned it a new value (§7.1).
 
 struct Engine {

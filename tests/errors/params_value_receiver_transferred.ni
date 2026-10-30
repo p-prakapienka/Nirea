@@ -1,4 +1,4 @@
-// A method's receiver is borrowed, so it can't also be passed by value to the same call (§7.3).
+// A method's receiver is a reference, so it can't also be passed by value to the same call (§7.3).
 
 struct Engine {
     int power;

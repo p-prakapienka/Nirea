@@ -1,4 +1,4 @@
-// Only a whole local variable can be moved; a field can't change owner (§7.1).
+// Only a whole local variable can give its object to a new owner; a field stays part of its owner (§7.1).
 
 struct Engine {
     int power;

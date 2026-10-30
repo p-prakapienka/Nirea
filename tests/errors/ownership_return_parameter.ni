@@ -1,4 +1,4 @@
-// Returning a reference parameter would move the caller's value; a function must return a copy (§7.3).
+// Returning a reference parameter would take the caller's object from its owner; a function must return a copy (§7.3).
 
 struct Engine {
     int power;

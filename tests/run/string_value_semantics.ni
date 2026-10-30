@@ -1,5 +1,5 @@
 // Strings aren't owned: assigning or passing a String copies it, and reading
-// a String field doesn't move it (§6.5, §7).
+// a String field doesn't transfer it (§6.5, §7).
 
 const String APP_NAME = "Nirea";
 

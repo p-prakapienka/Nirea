@@ -221,7 +221,7 @@ struct Expr {
     Alias *alias;
     int iface_method_index;
     Decl *iface_impl_struct; /* E_TO_IFACE: struct being converted */
-    bool is_move;            /* E_VAR used as a move source */
+    bool transfers_ownership; /* E_VAR whose object goes to a new owner */
     bool literal_untyped;    /* literal whose type came from the default, not context */
 };
 

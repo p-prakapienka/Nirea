@@ -1,4 +1,4 @@
-// Arrays are owned values like structs: assignment moves them and copy()
+// Arrays are owned values like structs: assignment transfers them and copy()
 // makes an independent deep copy (§6.6, §7.1, §7.2).
 
 struct Cell {

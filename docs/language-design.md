@@ -3,7 +3,7 @@
 **Version:** 0.4 — Value and reference parameters
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` takes ownership of its argument, `Engine* engine` borrows it. Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -337,7 +337,7 @@ grid[1][2] = 7;
 - `a[i]` accesses an element. The index can have any integer type. An index outside `0` to `N - 1` is a runtime error.
 - `a.length` is the number of elements, as an `int`.
 - `T[A][B]` is an array of `A` elements of type `T[B]`.
-- Arrays are owned values, like structs: assignment moves them and `copy()` copies them (§7).
+- Arrays are owned values, like structs: assignment transfers ownership of them and `copy()` copies them (§7).
 - Arrays can be local variables, fields, parameters (by value or by reference, §7.3) and return values. A reference to an array is written after its size: `int[4]* values`.
 
 ### 6.7 Enums
@@ -383,7 +383,7 @@ Engine second = first;
 
 The compiler prevents subsequent access through the previous owner.
 
-Ownership moves when a local variable is used as:
+Ownership is transferred when a local variable is used as:
 
 - the initialiser of a variable declaration: `Engine second = first;`
 - the right-hand side of an assignment to a variable, field or array element: `vehicle.engine = first;`
@@ -391,21 +391,21 @@ Ownership moves when a local variable is used as:
 - an argument for a value parameter (§7.3): `install(first);`
 - an element of an array initialiser, or the value of a switch-expression arm (§10.1) used in one of these positions.
 
-Only a whole local variable can be moved, and value parameters count as local variables. An object owned by another object, or borrowed by a function, can't change owner: fields, array elements, reference parameters, `this` and aliases can't be moved out of. To get an independent value from one of them, call `copy()`:
+Only a local variable, as a whole, can give its object to a new owner; value parameters count as local variables. An object owned by another object is part of that owner's memory and stays part of it: fields and array elements can't be given to a new owner. Neither can the objects that reference parameters, `this` and aliases refer to, because they belong to someone else. To get an independent object from any of them, call `copy()`:
 
 ```nirea
-Engine spare = vehicle.engine;          // error: can't move out of a field
+Engine spare = vehicle.engine;          // error: a field stays part of its owner
 Engine spare = vehicle.engine.copy();   // ok
 ```
 
-The compiler tracks moves through all control flow. Using a variable that has been moved, or may have been moved on some path, is a compile-time error. Assigning a new value to a moved variable makes it usable again.
+The compiler follows ownership transfers through all control flow. Using a variable after it has given its object away, or when it may have done so on some path, is a compile-time error. Assigning a new value to such a variable makes it usable again.
 
 ```nirea
 Engine first = createEngine();
 if (ready) {
     Engine second = first;
 }
-println(first.getPower());   // error: first may have been moved
+println(first.getPower());   // error: first may no longer own an object
 ```
 
 A value produced by a call, such as `createEngine()` or `first.copy()`, has no other owner, so it can be used in any of these positions.
@@ -427,28 +427,30 @@ Engine second = first.copy();
 
 A struct or array parameter is either a value or a reference.
 
-A **value parameter**, written `Engine engine`, owns its argument. Passing a local variable gives the function ownership, and the caller can't use the variable afterwards. Inside the function, a value parameter is an owned local variable: it can be modified, assigned, returned, stored in a field or passed on by value. Changes to it aren't visible to the caller.
+A **value parameter**, written `Engine engine`, is an object of its own in the called function's memory. The argument's contents are placed there, and the function owns that object. Inside the function, a value parameter is an owned local variable: it can be modified, assigned, returned, stored in a field or passed on by value. Changes to it aren't visible to the caller.
+
+When the argument is a local variable, ownership is transferred, exactly as for assignment (§7.1): the caller's variable can't be used afterwards.
 
 ```nirea
 struct Vehicle {
     Engine engine;
 
     void setEngine(Engine engine) {
-        this.engine = engine;      // ownership moves into the field
+        this.engine = engine;      // the field becomes the owner
     }
 }
 
 void main() {
     Engine engine = createEngine();
     Vehicle vehicle;
-    vehicle.setEngine(engine);     // engine now belongs to setEngine
+    vehicle.setEngine(engine);     // setEngine now owns the engine
     // engine is no longer accessible.
 }
 ```
 
-Only a value that a function owns as a local variable can be passed by value. A value owned by another object, such as a field or an array element, can't be passed by value, and neither can a reference parameter, `this` or an alias. To pass one of them, the caller passes a copy: `vehicle.setEngine(spare.engine.copy());`. A call result, such as `createEngine()`, can be passed by value directly.
+Only a function's own local variable can be passed by value. A field or an array element is part of its owner and stays there, so it can't be passed by value. Neither can a reference parameter, `this` or an alias, whose objects belong to someone else. To pass one of them by value, the caller passes a copy: `vehicle.setEngine(spare.engine.copy());`. A call result, such as `createEngine()`, can be passed by value directly.
 
-A **reference parameter**, written with `*` after the type, borrows its argument without taking ownership. The call site looks the same as for a value: `inspect(engine)`.
+A **reference parameter**, written with `*` after the type, refers to the caller's object where it is in memory. The object stays part of its owner, and ownership doesn't change. The call site looks the same as for a value: `inspect(engine)`.
 
 ```nirea
 void inspect(Engine* engine) {
@@ -464,7 +466,7 @@ void main() {
 }
 ```
 
-Through a reference, a function can read and write fields and elements and call methods, and the caller sees the changes. It can't move the referenced value or assign to it as a whole: the original owner keeps it. To keep the value, the function stores a copy:
+Through a reference, a function can read and write fields and elements and call methods, and the caller sees the changes. It can't give the object to a new owner or assign to it as a whole, because the object stays with its owner. To keep the value, the function stores a copy:
 
 ```nirea
 void setEngine(Engine* engine) {
@@ -472,15 +474,15 @@ void setEngine(Engine* engine) {
 }
 ```
 
-`T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the value it refers to. Only struct, array and interface types can be passed by reference. Interface parameters must be references (§5.3).
+`T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the object it refers to. Only struct, array and interface types can be passed by reference. Interface parameters must be references (§5.3).
 
-The same value can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. A local can't be both passed by value and borrowed in the same call. Parameters of primitive types, enums and `String` are always passed by value. They are local copies, and the function can assign to them.
+The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. A call can't take a local by value while also referring to it through the receiver or a reference parameter. Parameters of primitive types, enums and `String` are always passed by value. They are local copies, and the function can assign to them.
 
-The method receiver `this` is a reference to the value the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
+The method receiver `this` is a reference to the object the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
 
-Ownership transfer is never marked at a call site: there is no `borrow` keyword and no `move` keyword. The parameter declaration decides. Moving a local into a value parameter follows the same rules as assignment (§7.1).
+Nothing is written at the call site to pass a value or a reference: the parameter declaration decides.
 
-References must not outlive their referenced objects. References exist only as parameters, `this` and aliases (§9), none of which can outlive the value they refer to.
+References must not outlive their referenced objects. References exist only as parameters, `this` and aliases (§9), none of which can outlive the object they refer to.
 
 Raw pointers are not exposed in ordinary Nirea code.
 

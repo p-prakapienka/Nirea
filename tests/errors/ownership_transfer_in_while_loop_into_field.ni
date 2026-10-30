@@ -1,4 +1,4 @@
-// Moving an outer variable into a field inside a loop moves it again on the
+// Giving an outer variable's object to a field inside a loop transfers it again on the
 // next iteration (§7.1).
 
 struct Engine {

@@ -1,4 +1,4 @@
-// An array element can't be moved out of its array (§7.1).
+// An array element is part of its array and can't be given to a new owner (§7.1).
 
 struct Engine {
     int power;

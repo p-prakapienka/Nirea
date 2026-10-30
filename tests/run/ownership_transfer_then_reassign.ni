@@ -1,4 +1,4 @@
-// Assignment moves a struct. Assigning a new value to a moved variable makes
+// Assignment transfers ownership of a struct. Assigning a new value to the old owner makes
 // it usable again (§7.1).
 
 struct Engine {

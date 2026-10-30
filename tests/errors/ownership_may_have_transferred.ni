@@ -1,4 +1,4 @@
-// Using a variable that may have been moved on some path is rejected (§7.1).
+// Using a variable that may have transferred ownership on some path is rejected (§7.1).
 
 struct Engine {
     int power;

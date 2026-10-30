@@ -1,4 +1,4 @@
-// A call can't borrow a local and take it by value at the same time (§7.3).
+// A call can't refer to a local and take it by value at the same time (§7.3).
 
 struct Engine {
     int power;

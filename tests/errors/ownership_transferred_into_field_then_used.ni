@@ -1,4 +1,4 @@
-// Assigning a local to a field moves it; the local can't be used afterwards (§7.1).
+// Assigning a local to a field transfers ownership; the local can't be used afterwards (§7.1).
 
 struct Engine {
     int power;

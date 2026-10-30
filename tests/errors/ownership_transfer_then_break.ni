@@ -1,4 +1,4 @@
-// A move followed by break leaves the variable moved after the loop (§7.1).
+// An ownership transfer followed by break leaves the variable without its object after the loop (§7.1).
 
 struct Engine {
     int power;

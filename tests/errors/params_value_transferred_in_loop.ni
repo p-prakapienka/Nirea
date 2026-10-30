@@ -1,4 +1,4 @@
-// Passing a local by value inside a loop would move it on every iteration (§7.1, §7.3).
+// Passing a local by value inside a loop would transfer it again on every iteration (§7.1, §7.3).
 
 struct Engine {
     int power;

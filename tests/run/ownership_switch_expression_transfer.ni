@@ -1,4 +1,4 @@
-// The value of a switch-expression arm moves when the switch is used as an
+// The value of a switch-expression arm changes owner when the switch is used as an
 // initialiser or a return value (§7.1).
 
 struct Engine {

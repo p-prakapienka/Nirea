@@ -1,4 +1,4 @@
-// A move inside one switch arm means the variable may have been moved after
+// An ownership transfer inside one switch arm means the variable may no longer own its object after
 // the switch (§7.1).
 
 struct Engine {

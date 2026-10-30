@@ -637,7 +637,7 @@ static bool struct_implements(Decl *s, Decl *iface) {
 /* Expressions                                                             */
 
 static Type *check_value(Ctx *ctx, Expr *e, Type *expected);
-static void check_move_source(Ctx *ctx, Expr *e, bool is_argument);
+static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument);
 static void check_switch(Ctx *ctx, SwitchData *sw, Loc loc, bool is_expr, Expr *e, Type *expected);
 
 static Type *set_type(Expr *e, Type *t) {
@@ -901,7 +901,7 @@ static void check_args(Ctx *ctx, Expr *call, Decl *fn, const char *fn_desc) {
             if (!is_error(at) && at != pt) {
                 error_at(arg->loc, "%s: expected %s, found %s", what, type_name(pt), type_name(at));
             } else if (!fn->params.data[i]->is_ref) {
-                check_move_source(ctx, arg, true); /* value parameter: ownership moves into the call */
+                check_transfer_source(ctx, arg, true); /* value parameter: ownership is transferred */
             }
             continue;
         }
@@ -1377,7 +1377,7 @@ static Type *check_value(Ctx *ctx, Expr *e, Type *expected) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Moves and assignment targets (spec 7.1, 7.3)                           */
+/* Ownership transfers and assignment targets (spec 7.1, 7.3)             */
 
 static const char *place_description(Expr *e) {
     switch (e->kind) {
@@ -1386,32 +1386,30 @@ static const char *place_description(Expr *e) {
     case E_THIS: return "'this'";
     case E_ALIAS: return "an alias";
     case E_VAR: return e->var->kind == VAR_PARAM && e->var->is_ref ? "a reference parameter" : "a variable";
-    default: return "this expression";
+    default: return "the value of this expression";
     }
 }
 
-/* Validates an owned value used where ownership moves: variable initialiser,
- * assignment, return, value argument, array initialiser element or switch
- * arm. Only whole local variables (including value parameters) and call
- * results can move (spec 7.1, 7.3). */
-static void check_move_source(Ctx *ctx, Expr *e, bool is_argument) {
+/* Validates an owned value in a position where ownership is transferred:
+ * variable initialiser, assignment, return, value argument, array
+ * initialiser element or switch arm. Only whole local variables (including
+ * value parameters) and call results can go to a new owner (spec 7.1, 7.3). */
+static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     (void)ctx;
     if (is_error(e->type) || !type_is_owned(e->type)) return;
     switch (e->kind) {
     case E_VAR:
         if (e->var->kind == VAR_PARAM && e->var->is_ref) {
             if (is_argument) {
-                error_at(e->loc,
-                         "reference parameter '%s' can't be passed by value: its value belongs to the caller; pass "
-                         "%s.copy()",
+                error_at(e->loc, "'%s' refers to the caller's object and can't be passed by value; pass %s.copy()",
                          e->var->name, e->var->name);
             } else {
-                error_at(e->loc, "can't move out of reference parameter '%s', which belongs to the caller; use %s.copy()",
+                error_at(e->loc, "'%s' refers to the caller's object, which stays with its owner; use %s.copy()",
                          e->var->name, e->var->name);
             }
             return;
         }
-        e->is_move = true;
+        e->transfers_ownership = true;
         return;
     case E_CALL_FUNC:
     case E_CALL_METHOD:
@@ -1420,7 +1418,7 @@ static void check_move_source(Ctx *ctx, Expr *e, bool is_argument) {
     case E_COPY: return;
     case E_SWITCH:
         for (int i = 0; i < e->sw->arms.len; i++) {
-            if (e->sw->arms.data[i].expr) check_move_source(ctx, e->sw->arms.data[i].expr, is_argument);
+            if (e->sw->arms.data[i].expr) check_transfer_source(ctx, e->sw->arms.data[i].expr, is_argument);
         }
         return;
     case E_ALIAS:
@@ -1428,18 +1426,17 @@ static void check_move_source(Ctx *ctx, Expr *e, bool is_argument) {
             error_at(e->loc, "alias '%s' can't be passed by value; aliases never transfer ownership, so pass a copy",
                      e->alias->name);
         } else {
-            error_at(e->loc, "can't move a value through alias '%s'; aliases never transfer ownership", e->alias->name);
+            error_at(e->loc, "alias '%s' can't give its object to a new owner; aliases never transfer ownership, so use .copy()",
+                     e->alias->name);
         }
         return;
     default:
         if (is_argument) {
-            error_at(e->loc,
-                     "%s can't be passed by value because it keeps its owner; pass a copy with .copy(), or declare the "
-                     "parameter as a reference (%s*)",
+            error_at(e->loc, "%s stays with its owner and can't be passed by value; pass a copy with .copy(), or declare "
+                             "the parameter as a reference (%s*)",
                      place_description(e), type_name(e->type));
         } else {
-            error_at(e->loc, "can't move out of %s; %s keeps its owner, so use .copy()", place_description(e),
-                     place_description(e));
+            error_at(e->loc, "%s stays with its owner and can't be given to a new owner; use .copy()", place_description(e));
         }
         return;
     }
@@ -1724,7 +1721,7 @@ static void check_array_init(Ctx *ctx, Expr *init, Type *t) {
             if (!is_error(et) && et != t->elem) {
                 error_at(el->loc, "array element: expected %s, found %s", type_name(t->elem), type_name(et));
             } else {
-                check_move_source(ctx, el, false);
+                check_transfer_source(ctx, el, false);
             }
         } else {
             coerce(&init->args.data[i], t->elem, "array element");
@@ -1746,7 +1743,7 @@ static void check_initialiser(Ctx *ctx, Var *v, Expr **pinit) {
             error_at(init->loc, "initialiser of '%s': expected %s, found %s", v->name, type_name(t), type_name(it));
             return;
         }
-        check_move_source(ctx, init, false);
+        check_transfer_source(ctx, init, false);
         return;
     }
     coerce(pinit, t, fmt_str("initialiser of '%s'", v->name));
@@ -1775,7 +1772,7 @@ static void check_assign(Ctx *ctx, Stmt *s) {
                 error_at(s->value->loc, "assignment: expected %s, found %s", type_name(tt), type_name(vt));
                 return;
             }
-            check_move_source(ctx, s->value, false);
+            check_transfer_source(ctx, s->value, false);
             return;
         }
         if (tt->kind == TY_INTERFACE) return;
@@ -1903,7 +1900,7 @@ static void check_stmt(Ctx *ctx, Stmt *s) {
                 error_at(s->expr->loc, "return value: expected %s, found %s", type_name(rt), type_name(t));
                 return;
             }
-            check_move_source(ctx, s->expr, false);
+            check_transfer_source(ctx, s->expr, false);
             return;
         }
         coerce(&s->expr, rt, "return value");

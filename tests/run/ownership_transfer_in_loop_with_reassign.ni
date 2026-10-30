@@ -1,4 +1,4 @@
-// A variable moved inside a loop body and reassigned before the next
+// A variable that gives its object away inside a loop body and is reassigned before the next
 // iteration stays usable (§7.1).
 
 struct Engine {

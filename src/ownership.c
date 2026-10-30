@@ -1,14 +1,14 @@
-/* Flow-sensitive move checking (spec 7.1). Semantic analysis has already
- * marked every local variable used as a move source (Expr.is_move); this
- * pass tracks which owned locals are moved on each path and rejects uses of
- * moved or possibly moved variables. */
+/* Flow-sensitive ownership-transfer checking (spec 7.1). Semantic analysis
+ * has already marked every local variable whose object goes to a new owner
+ * (Expr.transfers_ownership); this pass follows which owned locals have given
+ * their object away on each path and rejects later uses of them. */
 #include <stdlib.h>
 #include <string.h>
 
 #include "lexer.h"
 #include "sema.h"
 
-enum { LIVE = 0, MOVED = 1, MAYBE = 2 };
+enum { OWNS = 0, GAVE_AWAY = 1, MAYBE_GAVE_AWAY = 2 };
 
 typedef struct State {
     uint8_t *v;
@@ -25,7 +25,7 @@ typedef struct OCtx {
     Decl *fn;
     int n;
     LoopCtx *loop;
-    Loc *move_loc;
+    Loc *transfer_loc;
     Expr *alias_use; /* outermost alias being expanded, for error locations */
 } OCtx;
 
@@ -50,7 +50,7 @@ static void state_join(OCtx *c, State *dst, State *src) {
         return;
     }
     for (int i = 0; i < c->n; i++) {
-        if (dst->v[i] != src->v[i]) dst->v[i] = MAYBE;
+        if (dst->v[i] != src->v[i]) dst->v[i] = MAYBE_GAVE_AWAY;
     }
 }
 
@@ -84,23 +84,23 @@ static Var *call_param(Expr *call, int i) {
     return fn->params.data[i];
 }
 
-/* A call can't move a local into a value parameter while it also borrows
- * that local through the receiver or a reference parameter. */
-static void check_borrow_and_move(Expr *call) {
+/* A call can't take a local by value while it also refers to that local
+ * through the receiver or a reference parameter. */
+static void check_reference_and_transfer(Expr *call) {
     if (error_suppress > 0) return;
     for (int i = 0; i < call->args.len; i++) {
         Expr *arg = call->args.data[i];
-        if (arg->kind != E_VAR || !arg->is_move) continue;
-        bool borrowed = false;
-        if ((call->kind == E_CALL_METHOD || call->kind == E_CALL_IFACE) && root_var(call->base) == arg->var) borrowed = true;
-        for (int j = 0; j < call->args.len && !borrowed; j++) {
+        if (arg->kind != E_VAR || !arg->transfers_ownership) continue;
+        bool referenced = false;
+        if ((call->kind == E_CALL_METHOD || call->kind == E_CALL_IFACE) && root_var(call->base) == arg->var) referenced = true;
+        for (int j = 0; j < call->args.len && !referenced; j++) {
             if (j == i) continue;
             Var *p = call_param(call, j);
             Expr *other = call->args.data[j];
-            if (p && (p->is_ref || p->type->kind == TY_INTERFACE) && root_var(other) == arg->var) borrowed = true;
+            if (p && (p->is_ref || p->type->kind == TY_INTERFACE) && root_var(other) == arg->var) referenced = true;
         }
-        if (borrowed) {
-            error_at(arg->loc, "'%s' can't be passed by value while the same call also borrows it", arg->var->name);
+        if (referenced) {
+            error_at(arg->loc, "'%s' can't be passed by value to a call that also refers to it", arg->var->name);
         }
     }
 }
@@ -111,23 +111,24 @@ static void use_var(OCtx *c, Expr *e, State *s) {
     Var *v = e->var;
     if (!tracked(v) || !s->reachable) return;
     uint8_t st = s->v[v->index];
-    if (st != LIVE) {
+    if (st != OWNS) {
         if (error_suppress == 0) {
             Loc loc = c->alias_use ? c->alias_use->loc : e->loc;
             const char *via = c->alias_use ? fmt_str(" (through alias '%s')", c->alias_use->alias->name) : "";
-            if (st == MOVED) {
-                error_at(loc, "'%s' was moved and can't be used here%s", v->name, via);
+            if (st == GAVE_AWAY) {
+                error_at(loc, "'%s' can't be used here: its object was given to a new owner%s", v->name, via);
             } else {
-                error_at(loc, "'%s' may have been moved on some path and can't be used here%s", v->name, via);
+                error_at(loc, "'%s' can't be used here: its object may have been given to a new owner on some path%s",
+                         v->name, via);
             }
-            if (c->move_loc[v->index].file) note_at(c->move_loc[v->index], "'%s' was moved here", v->name);
-            s->v[v->index] = LIVE; /* avoid repeated errors */
+            if (c->transfer_loc[v->index].file) note_at(c->transfer_loc[v->index], "ownership of '%s' was transferred here", v->name);
+            s->v[v->index] = OWNS; /* report each use only once */
         }
         return;
     }
-    if (e->is_move) {
-        s->v[v->index] = MOVED;
-        if (error_suppress == 0 || !c->move_loc[v->index].file) c->move_loc[v->index] = e->loc;
+    if (e->transfers_ownership) {
+        s->v[v->index] = GAVE_AWAY;
+        if (error_suppress == 0 || !c->transfer_loc[v->index].file) c->transfer_loc[v->index] = e->loc;
     }
 }
 
@@ -171,12 +172,12 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_CALL_IFACE:
         visit_expr(c, e->base, s);
         for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
-        check_borrow_and_move(e);
+        check_reference_and_transfer(e);
         return;
     case E_CALL_FUNC:
     case E_CALL_CTOR:
         for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
-        check_borrow_and_move(e);
+        check_reference_and_transfer(e);
         return;
     case E_CALL_PRINT:
     case E_ARRAY_INIT:
@@ -264,7 +265,7 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
         return;
     case S_VAR:
         if (st->init) visit_expr(c, st->init, s);
-        if (s->reachable && tracked(st->var)) s->v[st->var->index] = LIVE;
+        if (s->reachable && tracked(st->var)) s->v[st->var->index] = OWNS;
         return;
     case S_ALIAS: return;
     case S_EXPR: visit_expr(c, st->expr, s); return;
@@ -272,7 +273,7 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
         Var *whole = NULL;
         if (st->op == TOK_ASSIGN && assigns_whole_var(st->expr, &whole)) {
             visit_expr(c, st->value, s);
-            if (s->reachable && tracked(whole)) s->v[whole->index] = LIVE;
+            if (s->reachable && tracked(whole)) s->v[whole->index] = OWNS;
             return;
         }
         visit_expr(c, st->expr, s);
@@ -327,11 +328,11 @@ static void check_function(Decl *fn) {
     OCtx c = {0};
     c.fn = fn;
     c.n = fn->locals.len;
-    c.move_loc = xcalloc((size_t)(c.n ? c.n : 1), sizeof(Loc));
+    c.transfer_loc = xcalloc((size_t)(c.n ? c.n : 1), sizeof(Loc));
     State s = state_new(&c, true);
     visit_stmt(&c, fn->body, &s);
     free(s.v);
-    free(c.move_loc);
+    free(c.transfer_loc);
 }
 
 void ownership_check_program(Program *prog) {

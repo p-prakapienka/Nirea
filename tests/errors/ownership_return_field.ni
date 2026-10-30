@@ -1,4 +1,4 @@
-// Returning a field without copy() would move out of it (§7.1).
+// Returning a field without copy() would take it from its owner (§7.1).
 
 struct Engine {
     int power;

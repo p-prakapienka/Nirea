@@ -1,4 +1,4 @@
-// Fields, reference parameters, array elements, this and aliases can't be moved out of,
+// Fields, reference parameters, array elements, this and aliases can't give their objects to a new owner,
 // but copy() gives an independent value from each of them (§7.1, §7.2).
 
 struct Engine {

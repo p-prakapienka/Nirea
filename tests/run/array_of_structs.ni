@@ -1,5 +1,5 @@
 // Arrays of structs: elements are reached by index, and assigning to an
-// element moves the value in (§6.6, §7.1).
+// element gives the object to the array (§6.6, §7.1).
 
 struct Point {
     int x;

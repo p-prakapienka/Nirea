@@ -1,5 +1,5 @@
-// The value of a switch-expression arm used as an initialiser is moved, so
-// each arm's variable may have been moved afterwards (§7.1).
+// The value of a switch-expression arm used as an initialiser changes owner, so
+// each arm's variable may no longer own its object afterwards (§7.1).
 
 struct Engine {
     int power;

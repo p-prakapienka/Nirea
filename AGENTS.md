@@ -27,7 +27,7 @@ src/                       the compiler, in C11
 ├── parser.c               syntax tree (Appendix A)
 ├── ast.h, types.c         syntax tree and semantic types
 ├── sema.c                 name resolution and type checking
-├── ownership.c            flow-sensitive move checking (§7)
+├── ownership.c            ownership-transfer checking (§7)
 ├── codegen.c              C generation
 └── common.c               memory, strings, maps, diagnostics
 tests/

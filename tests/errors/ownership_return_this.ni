@@ -1,4 +1,4 @@
-// Returning this would move out of a non-owning reference (§7.1).
+// Returning this would take the object from its owner through a reference (§7.1).
 
 struct Engine {
     int power;

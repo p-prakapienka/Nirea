@@ -1,4 +1,4 @@
-// Ownership moves into fields, array elements and array initialisers, and a
+// Ownership transfers into fields, array elements and array initialisers, and a
 // call result can be used in any of these positions (§7.1).
 
 struct Engine {

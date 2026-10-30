@@ -1,4 +1,4 @@
-// this is a non-owning reference and can't be moved out of (§7.1).
+// this is a non-owning reference; its object can't be given to a new owner (§7.1).
 
 struct Engine {
     int power;
