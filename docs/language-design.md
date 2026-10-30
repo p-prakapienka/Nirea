@@ -1136,7 +1136,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.4. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.5. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
