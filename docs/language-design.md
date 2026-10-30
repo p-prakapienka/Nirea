@@ -341,7 +341,7 @@ Built-in methods:
 | `int length()`                       | The number of bytes                                                      |
 | `char charAt(int index)`             | The byte at `index`                                                      |
 | `void setCharAt(int index, char c)`  | Replaces the byte at `index`                                             |
-| `void append(String* text)`          | Adds the bytes of `text` at the end                                      |
+| `void append(String text)`           | Adds the bytes of `text` at the end                                      |
 | `void appendChar(char c)`            | Adds one byte at the end                                                 |
 | `String substring(int from, int to)` | A new `String` with the bytes from `from` up to, but not including, `to` |
 | `int indexOf(String* text)`          | The first index where `text` occurs, or `-1`; `0` for an empty `text`    |
@@ -350,6 +350,8 @@ Built-in methods:
 | `float64 toFloat64()`                | The text parsed as a `float64`                                           |
 | `String copy()`                      | An independent copy (§7.2)                                               |
 | `boolean equals(String* text)`       | Whether both strings hold the same bytes (§6.9)                          |
+
+`append` takes its argument by value (§7.3), so a string can be appended to itself: `s.append(s)` doubles `s`. The other methods use their `String` arguments in place, like `String*` parameters.
 
 `String.of(value)` creates a new `String` from a value of a primitive or enum type, with the same text `print` would write (§15): `String.of(42)` is `"42"`.
 
@@ -736,7 +738,7 @@ vehicle.setEngine(vehicle.engine);   // error if setEngine takes an Engine*
 addFrom(counter, counter.copy());    // ok
 ```
 
-The same holds for built-in methods, such as `text.append(text)` and `text.equals(text)`: pass `text.copy()` instead. Arguments for value parameters are copies (§7.3), so they never overlap.
+The same holds for built-in methods with `String*` parameters, such as `text.indexOf(text)` and `text.equals(text)`: pass `text.copy()` instead. Arguments for value parameters are copies (§7.3), so they never overlap.
 
 Because an object is never reachable through two references in use, replacing an object or giving it to a new owner can't leave a reference to the old object behind.
 
