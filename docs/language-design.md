@@ -466,6 +466,8 @@ void main() {
 }
 ```
 
+A reference can refer to any object, including one that is part of another: `inspect(vehicle.engine)` and `inspect(engines[0])` refer to the field and the element where they are, inside their owners. Only passing them by value requires `.copy()`.
+
 Through a reference, a function can read and write fields and elements and call methods, and the caller sees the changes. It can't give the object to a new owner or assign to it as a whole, because the object stays with its owner. To keep the value, the function stores a copy:
 
 ```nirea
