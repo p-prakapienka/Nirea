@@ -100,7 +100,7 @@ void main() {
 }
 ```
 
-Functions, methods and constructors can't be overloaded: each name is declared once in its scope (§18). Functions can call each other regardless of declaration order, and recursion is allowed.
+Functions, methods and constructors can't be overloaded: each name is declared once in its scope (§18). Declarations can be used regardless of their order in the file: functions can call functions declared later, and recursion is allowed. The same holds for structs, interfaces, enums and constants.
 
 A program has exactly one top-level `main` function, declared as `void main()` or `int main()`. The value returned by `int main()` is the process exit status.
 
@@ -171,9 +171,9 @@ Design rules:
 - Abstract classes are not supported.
 - Multiple interface implementation is supported.
 
-A struct implements an interface by declaring a public method with the same name, parameter types and return type for every method of the interface.
+A struct implements an interface only by listing it after `:`. It must then declare a public method with the same name, parameter types and return type for every method of the interface. Having matching methods without listing the interface doesn't implement it.
 
-Interface types can be used only as parameter types. An interface-typed parameter is a non-owning reference to a struct value that implements the interface, and calls through it use dynamic dispatch. Any struct that implements the interface can be passed for it.
+Interface types can be used only as parameter types. An interface-typed parameter is a non-owning reference to a struct value that implements the interface, and calls through it use dynamic dispatch. Any struct that implements the interface can be passed for it, and an interface-typed parameter can itself be passed on to another parameter of the same interface type.
 
 ```nirea
 void render(Drawable shape) {
@@ -211,7 +211,7 @@ void main() {
 
 All fields hold their zero value (§6.8) before the constructor body runs, so no field is ever read uninitialised. A constructor can set private fields.
 
-A struct that declares no constructor can be created with `T()`, which produces a zero-initialised value. A declaration without an initialiser, such as `Vec2 v;`, is equivalent. For a struct that declares a constructor, both forms are errors: values of that type must come from its constructor.
+A struct that declares no constructor can be created with `T()`, which produces a zero-initialised value. A declaration without an initialiser, such as `Vec2 v;`, is equivalent. For a struct that declares a constructor, `T(...)` always calls that constructor, and a declaration without an initialiser is an error. The exception is storage owned by another value: fields and array elements of that struct type start at their zero value (§6.8).
 
 ### 5.5 Constants
 
@@ -275,30 +275,33 @@ A conversion is implicit only when every value of the source type is exactly rep
 
 Other numeric conversions need an explicit cast, written as in Java: `(int) value`. Casts are allowed between any two numeric types, and between `char` and integer types.
 
-- Integer-to-integer casts keep the low bits of the two's-complement representation, as in Java and C. For example, `(uint8) 300` is `44`.
-- Float-to-integer casts truncate toward zero. Casting NaN, an infinity or an out-of-range value is a runtime error (§6.4).
+- Integer-to-integer and integer-to-`char` casts keep the low bits of the two's-complement representation, as in Java and C. For example, `(uint8) 300` is `44` and `(char) 321` is `'A'`. A `char` cast to an integer type gives its value, 0 to 255.
+- Float-to-integer casts truncate toward zero. Casting NaN or an infinity is a runtime error (§6.4), and so is a value whose truncation doesn't fit the target type: `(uint8) -0.5` is `0`, but `(uint8) -1.0` is an error. Floating-point values can't be cast to `char`.
 - Conversions to a floating-point type round to the nearest representable value.
 
 ### 6.3 Literals
 
-- Integer literals: decimal (`42`), hexadecimal (`0x2A`) and binary (`0b101010`). Underscores can separate digits (`1_000_000`). A decimal literal other than `0` can't start with `0`.
-- Floating-point literals have a fractional part, an exponent or both: `1.5`, `2.0e-3`, `1e9`.
+- Integer literals: decimal (`42`), hexadecimal (`0x2A` or `0x2a`) and binary (`0b101010`). Underscores can appear only between digits (`1_000_000`). A decimal literal other than `0` can't start with `0`. Hexadecimal and binary literals denote values, not bit patterns: `0x80000000` is 2147483648, which doesn't fit `int`.
+- Floating-point literals have a fractional part, an exponent (`e` or `E`) or both: `1.5`, `2.0e-3`, `1E9`. A literal needs a digit on both sides of the decimal point.
 - Character literals: `'a'`, `'\n'`.
 - String literals: `"text"`.
 - Boolean literals: `true` and `false`.
-- Escape sequences in character and string literals: `\n`, `\t`, `\r`, `\0`, `\\`, `\'`, `\"` and `\xHH`.
+- Escape sequences in character and string literals: `\n`, `\t`, `\r`, `\0`, `\\`, `\'`, `\"` and `\xHH`. Any other escape is an error. A character literal holds exactly one byte.
 
 Numeric literals take their type from context. An integer literal can be used as any integer or floating-point type that represents its value exactly. A floating-point literal can be used as `float` or `float64`; it is rounded to the nearest `float` when used as `float`. A literal that doesn't fit its target type is a compile-time error. With no context, an integer literal is an `int` and a floating-point literal is a `float64`.
 
-The context of an operand is the other operand, or for an operation on two literals, the context of the whole expression: in `float x = 2 * 1.5;` both literals are `float`. Division and remainder between two integer literals are always integer operations, as in C and Java: `float64 half = 1 / 2;` gives `0.0`, and `float x = 1 / 2;` is an error because `int` doesn't convert to `float` implicitly.
+A negated literal counts as a single literal, so `int8 low = -128;` is valid. The context of an operand is the other operand, or for an operation on two literals, the context of the whole expression: in `float x = 2 * 1.5;` both literals are `float`. Division and remainder between two integer literals are always integer operations, as in C and Java: `float64 half = 1 / 2;` gives `0.0`, and `float x = 1 / 2;` is an error because `int` doesn't convert to `float` implicitly.
 
 ### 6.4 Arithmetic and runtime errors
 
-Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2), and arithmetic produces a value of that type. Mixing signed and unsigned operands of the same width, or `int64` with `uint64`, needs a cast. Unary minus isn't allowed on unsigned types.
+Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2): one operand is converted to the other's type, and arithmetic produces a value of that type. If neither operand converts to the other's type, a cast is needed. For example, `int8 + int` is an `int`, but `uint8 + int8` and `int + float` are errors. Unary minus isn't allowed on unsigned types.
+
+Integer division truncates toward zero, and the remainder has the sign of the dividend, as in C and Java: `-7 / 2` is `-3` and `-7 % 2` is `-1`.
 
 Integer overflow is a runtime error. So are:
 
-- division or remainder by zero, and dividing the smallest signed value by `-1`;
+- integer division or remainder by zero;
+- dividing the smallest value of a signed type by `-1`, which overflows (the remainder of that division is `0`, not an error);
 - shifting by a negative amount, or by at least the width of the shifted type;
 - an array index out of range (§6.6);
 - an invalid float-to-integer cast (§6.2).
@@ -307,7 +310,7 @@ A runtime error stops the program immediately, with a message naming the error a
 
 `<<` shifts in zeros and discards the bits shifted out; it isn't checked for overflow. `>>` is an arithmetic shift for signed types and a logical shift for unsigned types. The shift amount can have any integer type. `&`, `|`, `^` and `~` work on integer types.
 
-Floating-point arithmetic follows IEEE 754: division by zero produces an infinity or NaN and isn't an error. `%` on floating-point values gives a remainder with the sign of the dividend, like C's `fmod`.
+Floating-point arithmetic follows IEEE 754: division or remainder by zero produces an infinity or NaN and isn't an error. `%` on floating-point values gives a remainder with the sign of the dividend, like C's `fmod`.
 
 ### 6.5 Strings
 
@@ -355,7 +358,7 @@ Enum values are written qualified with the enum name, such as `State.IDLE`, exce
 
 Every type has a zero value: `0` for numbers, `false` for `boolean`, `'\0'` for `char`, `""` for `String`, the first value for an enum, all fields zero for a struct and all elements zero for an array.
 
-A local variable declared without an initialiser holds its type's zero value, except for struct types that declare a constructor (§5.4). Struct fields and array elements always start at their zero value. No value can be read uninitialised.
+A local variable declared without an initialiser holds its type's zero value, except for struct types that declare a constructor (§5.4). Struct fields and array elements always start at their zero value, even when their struct type declares a constructor. No value can be read uninitialised.
 
 ## 7. Ownership and memory safety
 
@@ -438,6 +441,8 @@ void main() {
 ```
 
 Functions never take ownership of their arguments. Parameters of struct and array types are non-owning references to the caller's value. The function can read and write fields and elements and call methods, and the caller sees the changes. Parameters of primitive types, enums and `String` are passed by value. The method receiver `this` is a non-owning reference in the same way.
+
+The same value can be passed to several reference parameters of one call, as in `swapPower(engine, engine)`. Parameters of primitive types, enums and `String` are local copies, and the function can assign to them.
 
 A function can't move a parameter, or assign to a struct or array parameter as a whole. To keep a value it receives, it stores a copy:
 
@@ -582,7 +587,14 @@ Expressions are evaluated left to right, including function arguments. `&&` and 
 
 Assignment (`=` and compound assignments such as `+=`), `++` and `--` are statements, not expressions, so they can't be nested inside other expressions.
 
-A function with a non-`void` return type must return a value on every path.
+A function with a non-`void` return type must return a value on every path. A path ends with `return` or with a loop that never exits: `while (true)`, `for (;;)` or `do ... while (true)` without a `break`. An `if` with an `else`, or a switch statement, returns on every path when every branch does.
+
+Further rules:
+
+- A local variable can't have the same name as another local variable, parameter or alias that is in scope. A variable declared in a `for` header is scoped to the loop.
+- `break` and `continue` outside a loop are errors.
+- Statements after `return`, `break` or `continue` are allowed and never run.
+- Only calls can be used as expression statements. A call's result may be discarded.
 
 ### 10.1 Switch expressions
 
@@ -615,7 +627,7 @@ switch (state) {
 }
 ```
 
-An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. `break` and `continue` inside a switch arm apply to the enclosing loop.
+An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values. `break` and `continue` inside a switch arm apply to the enclosing loop.
 
 ### 10.2 Exhaustiveness
 
@@ -685,7 +697,7 @@ void main() {
 - Namespaces are independent of filesystem directories.
 - Namespace declarations do not imply nested namespace hierarchies.
 - Namespaces can't be nested, and each namespace is declared once in a program.
-- Inside a namespace, its own members can be used without the namespace prefix.
+- Inside a namespace, its own members can be used without the namespace prefix. A namespace member can have the same name as a top-level declaration. Inside the namespace, the member takes precedence.
 - A namespace can contain `extern "C"` blocks (§14).
 
 Namespaces replace the need for static classes and static methods.
@@ -896,7 +908,15 @@ Potential areas:
 
 The compiler and runtime should remain as small as reasonably possible.
 
-Until a standard library exists, the compiler provides two built-in functions for output: `print(value)` and `println(value)`. They accept one value of a primitive, enum or `String` type, and `println()` with no argument prints an empty line. Floating-point values print in their shortest form that reads back as the same value, always with a decimal point or exponent (`1.0`, `0.1`, `1.0E10`).
+Until a standard library exists, the compiler provides two built-in functions for output: `print(value)` and `println(value)`. They accept one value of a primitive, enum or `String` type, and `println()` with no argument prints an empty line. Values print as follows:
+
+- Integers print in decimal, and `boolean` values as `true` or `false`.
+- A `char` prints as its byte.
+- A string prints its bytes.
+- An enum value prints the name of the value, without the enum or namespace name.
+- Floating-point values print in their shortest form that reads back as the same value of the same type, always with a decimal point or exponent. Magnitudes from `0.001` up to `10000000` use plain notation (`1.0`, `0.1`, `123.25`); others use an exponent (`1.0E10`, `1.5E-5`). NaN prints as `NaN`, and infinities as `Infinity` and `-Infinity`.
+
+`print` and `println` write to the C library's standard output, the same stream C functions such as `printf` use, so output appears in program order.
 
 ## 16. Project management and build structure
 
