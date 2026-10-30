@@ -1,5 +1,6 @@
 // A value parameter receives a copy of any object: a local, a field, an array
-// element, a reference, this or an alias; the original is unchanged (§7.3).
+// element, a reference parameter or variable, or this; the original is
+// unchanged (§7.3).
 
 struct Engine {
     int power;
@@ -55,7 +56,7 @@ void main() {
     println(vehicle.spares[1].power);    // expect: 3
     println(fromReference(engine));      // expect: 101
     println(engine.boostCopy());         // expect: 101
-    alias spare = vehicle.spares[1];
+    Engine* spare = vehicle.spares[1];
     println(boosted(spare));             // expect: 103
 
     println(combine(engine, engine));    // expect: 3

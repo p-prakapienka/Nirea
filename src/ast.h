@@ -98,16 +98,11 @@ struct Var {
     Loc loc;
     TypeExpr *type_expr;
     Type *type;
-    bool is_ref; /* reference parameter, written T* (spec 7.3) */
-    int index;   /* per function, for ownership analysis */
+    bool is_ref;        /* reference parameter or variable, written T* (spec 7.3, 9.1) */
+    bool ref_to_caller; /* reference variable whose object outlives the function (spec 9.2) */
+    int index;          /* per function, for ownership analysis */
     const char *cname;
 };
-
-typedef struct Alias {
-    const char *name;
-    Loc loc;
-    Expr *expr;
-} Alias;
 
 /* ---- Expressions ---- */
 
@@ -134,10 +129,10 @@ typedef enum ExprKind {
     E_FIELD,       /* base.field */
     E_ENUM_VALUE,  /* Enum.VALUE */
     E_CONST,       /* reference to a constant */
-    E_ALIAS,       /* use of an alias */
     E_CALL_FUNC,   /* free function or extern function */
     E_CALL_METHOD, /* base.method(args), static dispatch */
     E_CALL_IFACE,  /* base.method(args) through an interface reference */
+                   /* (these three produce a reference when decl->ret_is_ref) */
     E_CALL_CTOR,   /* Struct(args) */
     E_CALL_PRINT,  /* print/println */
     E_CALL_STRING, /* built-in String method (base = receiver) or String.of (no base) */
@@ -221,7 +216,6 @@ struct Expr {
     Var *var;
     Decl *decl;   /* field, enum, const, function, method, struct, namespace */
     int enum_index;
-    Alias *alias;
     int iface_method_index;
     Decl *iface_impl_struct; /* E_TO_IFACE: struct being converted */
     bool transfers_ownership; /* E_VAR whose object goes to a new owner */
@@ -237,7 +231,6 @@ struct Expr {
 typedef enum StmtKind {
     S_BLOCK,
     S_VAR,
-    S_ALIAS,
     S_EXPR,
     S_ASSIGN,
     S_INCDEC,
@@ -257,7 +250,6 @@ struct Stmt {
     StmtVec stmts;  /* block */
     Var *var;       /* S_VAR */
     Expr *init;     /* S_VAR initialiser */
-    Alias *alias;   /* S_ALIAS */
     Expr *expr;     /* S_EXPR, S_RETURN value, condition, assignment target */
     Expr *value;    /* S_ASSIGN right-hand side */
     int op;         /* S_ASSIGN operator token (TOK_ASSIGN, TOK_PLUS_ASSIGN, ...), S_INCDEC token */
@@ -321,6 +313,7 @@ struct Decl {
     /* functions, methods, constructors, extern functions, interface methods */
     TypeExpr *ret_expr;
     Type *ret_type;
+    bool ret_is_ref; /* returns a reference, written T* (spec 9.2) */
     VarVec params;
     bool variadic;
     Stmt *body;
@@ -346,6 +339,13 @@ struct Decl {
     Type *const_type;
     Expr *const_value;
 };
+
+/* True for a call whose result is a reference rather than a new object
+ * (spec 9.2). */
+static inline bool is_ref_call(Expr *e) {
+    return (e->kind == E_CALL_FUNC || e->kind == E_CALL_METHOD || e->kind == E_CALL_IFACE) && e->decl &&
+           e->decl->ret_is_ref;
+}
 
 typedef struct Program {
     VEC(SourceFile *) files;

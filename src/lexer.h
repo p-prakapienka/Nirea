@@ -13,7 +13,6 @@ typedef enum TokenKind {
     TOK_IMPORT_PATH,
 
     /* keywords */
-    TOK_ALIAS,
     TOK_BOOLEAN,
     TOK_BREAK,
     TOK_CASE,
@@ -36,7 +35,6 @@ typedef enum TokenKind {
     TOK_INT16,
     TOK_INT64,
     TOK_INTERFACE,
-    TOK_IS,
     TOK_NAMESPACE,
     TOK_PRIVATE,
     TOK_RETURN,

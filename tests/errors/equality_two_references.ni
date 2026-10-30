@@ -1,4 +1,4 @@
-// == only compares values; two references are compared with `is` (§6.9, §6.10).
+// == only compares values; what two references refer to is compared with equals (§6.9).
 
 struct Engine {
     int power;
@@ -9,6 +9,7 @@ boolean same(Engine* a, Engine* b) {
 }
 
 void main() {
-    Engine engine;
-    println(same(engine, engine));
+    Engine first;
+    Engine second;
+    println(same(first, second));
 }

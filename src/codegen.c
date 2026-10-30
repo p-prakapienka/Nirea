@@ -193,7 +193,7 @@ static const char *paren(const char *c) {
 /* Names                                                                   */
 
 static const char *var_ref(Var *v) {
-    if (v->kind == VAR_PARAM && v->is_ref && type_is_owned(v->type)) return fmt_str("(*nr_l_%s)", v->name);
+    if (v->is_ref && type_is_owned(v->type)) return fmt_str("(*nr_l_%s)", v->name);
     return fmt_str("nr_l_%s", v->name);
 }
 
@@ -347,7 +347,6 @@ static bool is_place(Expr *e) {
     case E_THIS:
     case E_INDEX:
     case E_FIELD: return true;
-    case E_ALIAS: return is_place(e->alias->expr);
     default: return false;
     }
 }
@@ -373,7 +372,6 @@ static const char *gen_place(CG *cg, Expr *e) {
              is_unsigned ? "uint64_t" : "int64_t", index, (long long)e->base->type->length, loc_str(e->loc));
         return fmt_str("%s.a[%s]", base, t);
     }
-    case E_ALIAS: return gen_place(cg, e->alias->expr);
     default: return gen_expr(cg, e);
     }
 }
@@ -421,6 +419,26 @@ static const char *gen_arg(CG *cg, Expr *arg, Var *param, bool is_extern) {
     const char *v = gen_expr(cg, arg);
     if (is_extern && arg->type == type_char) return fmt_str("(char)%s", v);
     return v;
+}
+
+/* C return type of a function: a pointer for a reference to an owned type,
+ * and an interface value for a reference to an interface (spec 9.2). */
+static const char *ret_ctype(Decl *fn) {
+    Type *ret = fn->kind == D_CTOR ? fn->owner->type : fn->ret_type;
+    if (fn->ret_is_ref && type_is_owned(ret)) return fmt_str("%s*", ctype(ret));
+    return ctype(ret);
+}
+
+/* Emits a call that returns a reference. The result refers to an existing
+ * object, so it is never a temporary to destroy. */
+static const char *finish_ref_call(CG *cg, Decl *fn, const char *call, bool want_value) {
+    if (!want_value) {
+        emit(cg, "%s;", call);
+        return "";
+    }
+    const char *t = new_tmp(cg);
+    emit(cg, "%s %s = %s;", ret_ctype(fn), t, call);
+    return type_is_owned(fn->ret_type) ? fmt_str("(*%s)", t) : t;
 }
 
 /* Emits a call. Owned results become temporaries even when unused, so they
@@ -514,6 +532,7 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
         }
         const char *call = fmt_str("%s(%s)", fn->cname, sb_cstr(&args));
         if (is_extern && fn->ret_type == type_char) call = fmt_str("(uint8_t)%s", call);
+        if (fn->ret_is_ref) return finish_ref_call(cg, fn, call, want_value);
         return finish_call(cg, fn->ret_type, call, want_value);
     }
     case E_CALL_METHOD: {
@@ -522,7 +541,9 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
         for (int i = 0; i < e->args.len; i++) {
             sb_printf(&args, ", %s", gen_arg(cg, e->args.data[i], fn->params.data[i], false));
         }
-        return finish_call(cg, fn->ret_type, fmt_str("%s(%s)", fn->cname, sb_cstr(&args)), want_value);
+        const char *call = fmt_str("%s(%s)", fn->cname, sb_cstr(&args));
+        if (fn->ret_is_ref) return finish_ref_call(cg, fn, call, want_value);
+        return finish_call(cg, fn->ret_type, call, want_value);
     }
     case E_CALL_IFACE: {
         const char *recv = gen_expr(cg, e->base);
@@ -530,7 +551,9 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
         for (int i = 0; i < e->args.len; i++) {
             sb_printf(&args, ", %s", gen_arg(cg, e->args.data[i], fn->params.data[i], false));
         }
-        return finish_call(cg, fn->ret_type, fmt_str("%s.vt->m_%s(%s)", recv, fn->name, sb_cstr(&args)), want_value);
+        const char *call = fmt_str("%s.vt->m_%s(%s)", recv, fn->name, sb_cstr(&args));
+        if (fn->ret_is_ref) return finish_ref_call(cg, fn, call, want_value);
+        return finish_call(cg, fn->ret_type, call, want_value);
     }
     case E_CALL_CTOR: {
         Decl *s = e->decl;
@@ -701,17 +724,6 @@ static const char *gen_binary(CG *cg, Expr *e) {
         add_temp(cg, t, type_string);
         return t;
     }
-    if (op == TOK_IS) {
-        /* identity: both operands are references (spec 6.10) */
-        if (lt->kind == TY_INTERFACE) {
-            const char *l = gen_expr(cg, e->base);
-            const char *r = gen_expr(cg, e->index);
-            return fmt_str("(%s.self == %s.self)", l, r);
-        }
-        const char *l = gen_ref(cg, e->base);
-        const char *r = gen_ref(cg, e->index);
-        return fmt_str("((const void *)%s == (const void *)%s)", l, r);
-    }
     if ((op == TOK_EQ || op == TOK_NE) && type_is_owned(lt)) {
         const char *l = gen_lvalue(cg, e->base);
         const char *r = gen_lvalue(cg, e->index);
@@ -763,7 +775,7 @@ static const char *gen_switch_expr(CG *cg, Expr *e) {
 static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     if (e->implicit_copy) {
         /* an existing object passed to a value parameter is copied (spec 7.3) */
-        const char *p = gen_place(cg, e);
+        const char *p = is_ref_call(e) ? gen_call(cg, e, true) : gen_place(cg, e);
         const char *t = new_tmp(cg);
         emit(cg, "%s %s = %s;", ctype(e->type), t, copy_expr(e->type, p));
         add_temp(cg, t, e->type);
@@ -803,7 +815,6 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
         emit(cg, "%s %s = %s;", ctype(e->type), t, p);
         return t;
     }
-    case E_ALIAS: return gen_expr_impl(cg, e->alias->expr, want_value);
     case E_ENUM_VALUE: return fmt_str("%d", e->enum_index);
     case E_CONST: {
         if (e->type != type_string) return e->decl->cname;
@@ -994,6 +1005,14 @@ static void gen_stmt(CG *cg, Stmt *s) {
     case S_VAR: {
         Var *v = s->var;
         const char *name = fmt_str("nr_l_%s", v->name);
+        if (v->is_ref) {
+            /* a reference variable: the address of an existing object, or an
+             * interface value (spec 9.1) */
+            if (v->type->kind == TY_INTERFACE) emit(cg, "%s %s = %s;", ctype(v->type), name, gen_iface_arg(cg, s->init));
+            else emit(cg, "%s *%s = %s;", ctype(v->type), name, gen_ref(cg, s->init));
+            drop_temps(cg, mark);
+            return;
+        }
         if (!s->init) {
             emit(cg, "%s %s = %s;", ctype(v->type), name, zero_init(v->type));
         } else if (s->init->kind == E_ARRAY_INIT) {
@@ -1007,7 +1026,6 @@ static void gen_stmt(CG *cg, Stmt *s) {
         add_drop_var(cg, name, v->type);
         return;
     }
-    case S_ALIAS: return;
     case S_EXPR:
         gen_expr_impl(cg, s->expr, false);
         drop_temps(cg, mark);
@@ -1062,6 +1080,14 @@ static void gen_stmt(CG *cg, Stmt *s) {
         if (cg->fn->kind == D_CTOR) {
             drop_vars_from(cg, 0);
             emit(cg, "return nr_self_val;");
+        } else if (s->expr && cg->fn->ret_is_ref) {
+            Type *t = cg->fn->ret_type;
+            const char *v = t->kind == TY_INTERFACE ? gen_iface_arg(cg, s->expr) : gen_ref(cg, s->expr);
+            const char *r = new_tmp(cg);
+            emit(cg, "%s %s = %s;", ret_ctype(cg->fn), r, v);
+            drop_temps(cg, mark);
+            drop_vars_from(cg, 0);
+            emit(cg, "return %s;", r);
         } else if (s->expr) {
             Type *t = cg->fn->ret_type;
             const char *v = type_is_owned(t) ? gen_owned_value(cg, s->expr) : gen_expr(cg, s->expr);
@@ -1099,8 +1125,7 @@ static const char *function_signature(Decl *fn) {
         count++;
     }
     if (!count) sb_append(&params, "void");
-    Type *ret = fn->kind == D_CTOR ? fn->owner->type : fn->ret_type;
-    return fmt_str("%s %s(%s)", ctype(ret), fn->cname, sb_cstr(&params));
+    return fmt_str("%s %s(%s)", ret_ctype(fn), fn->cname, sb_cstr(&params));
 }
 
 static const char *extern_c_type(Type *t) {
@@ -1298,7 +1323,7 @@ char *codegen_program(Program *prog) {
             StrBuf params = {0};
             sb_append(&params, "void *nr_self");
             for (int k = 0; k < m->params.len; k++) sb_printf(&params, ", %s", param_decl(m->params.data[k]));
-            emit(&cg, "%s (*m_%s)(%s);", ctype(m->ret_type), m->name, sb_cstr(&params));
+            emit(&cg, "%s (*m_%s)(%s);", ret_ctype(m), m->name, sb_cstr(&params));
         }
         if (!d->members.len) emit(&cg, "char nr_empty;");
         cg.indent--;
@@ -1374,7 +1399,7 @@ char *codegen_program(Program *prog) {
                     sb_printf(&params, ", %s", param_decl(im->params.data[p]));
                     sb_printf(&args, ", nr_l_%s", im->params.data[p]->name);
                 }
-                emit(&cg, "static %s %s(%s) {", ctype(im->ret_type), thunk, sb_cstr(&params));
+                emit(&cg, "static %s %s(%s) {", ret_ctype(im), thunk, sb_cstr(&params));
                 emit(&cg, "    %s%s(%s);", im->ret_type == type_void ? "" : "return ", m->cname, sb_cstr(&args));
                 emit(&cg, "}");
                 sb_printf(&init, "%s%s", k ? ", " : "", thunk);

@@ -1,4 +1,4 @@
-// Interface types can be used only as parameter types; local variables of
+// Interface types can be used only as references (Shape*); owned variables of
 // interface type are not supported (§5.3).
 
 interface Shape {
