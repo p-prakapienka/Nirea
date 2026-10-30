@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.9 — Implicit copies for strings and value parameters
+**Version:** 0.9 — Value parameters receive copies
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes strings copy implicitly, like primitive values (§6.5), and makes value parameters receive copies of their arguments (§7.3). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -316,11 +316,9 @@ Floating-point arithmetic follows IEEE 754: division or remainder by zero produc
 
 ### 6.5 Strings
 
-`String` is a built-in type holding a sequence of bytes. Strings behave like primitive values: assigning a `String`, returning it or passing it to a value parameter copies it, and the original stays usable. This includes strings that are fields or array elements: `String name = person.name;` copies the name and leaves `person` unchanged. Each `String` has its own bytes, freed automatically when its owner ends (§7.6).
+`String` is a built-in object type holding a sequence of bytes. A `String` follows exactly the same rules as a struct (§7): assigning it or returning it transfers ownership, passing it to a value parameter passes a copy (§7.3), a `String*` parameter refers to it in place, and `copy()` creates an independent copy. A `String` field or array element is part of its owner. Each `String` has its own bytes, freed automatically when its owner ends (§7.6).
 
-This is the one deliberate exception to Nirea's rule against implicit copying (§17): most programmers expect text to behave like a number, and writing `copy()` for every call would be noise. Each implicit copy allocates memory for the bytes. To avoid a copy, pass a `String*` reference, which refers to the string in place, as for structs (§7.3). `copy()` is still available to copy explicitly.
-
-A string literal such as `"text"` creates a new `String` object each time it is evaluated. A `String` can be changed through its methods; changes never affect other `String` objects.
+The only difference from a struct is the string literal: `"text"` creates a new `String` object each time it is evaluated, so it can initialise or be assigned to any `String` variable. A `String` can be changed through its methods; changes never affect other `String` objects.
 
 ```nirea
 String greeting = "Hello";
@@ -328,10 +326,12 @@ greeting.append(", Nirea");
 greeting.appendChar('!');
 println(greeting);                 // Hello, Nirea!
 
-String other = greeting;           // copies; greeting stays usable
-other.setCharAt(0, 'J');
+String copy = greeting.copy();    // both stay usable
+copy.setCharAt(0, 'J');
 println(greeting);                 // Hello, Nirea!
-println(other);                    // Jello, Nirea!
+println(copy);                     // Jello, Nirea!
+
+String moved = greeting;           // greeting is no longer accessible
 ```
 
 Built-in methods:
@@ -457,7 +457,7 @@ Memory safety is one of Nirea's fundamental design principles.
 
 Nirea uses exclusive ownership: every owned object has exactly one owner at a time.
 
-Values of struct and array types are owned objects. Values of primitive types and enums are plain values: assigning or passing them copies them, and the ownership rules below don't apply to them. A `String` is owned by its variable, field or element and freed with it, but it is copied instead of transferred wherever this section transfers ownership (§6.5).
+Values of struct, array and `String` types are owned objects. Values of primitive types and enums are plain values: assigning or passing them copies them, and the ownership rules below don't apply to them.
 
 The owner of a value is a local variable, a field of another owned value, or an element of an owned array.
 
@@ -540,7 +540,7 @@ void main() {
 }
 ```
 
-Copying is the second deliberate exception to Nirea's rule against implicit copying (§17), so that passing a value works the same for every type. To pass an object without copying it, declare the parameter as a reference.
+This is the one deliberate exception to Nirea's rule against implicit copying (§17): it saves writing `copy()` for every call, and works the same for structs, arrays and strings. To pass an object without copying it, declare the parameter as a reference.
 
 A **reference parameter**, written with `*` after the type, refers to the caller's object where it is in memory. The object stays part of its owner, and ownership doesn't change. The call site looks the same as for a value: `inspect(engine)`.
 
@@ -570,7 +570,7 @@ void setEngine(Engine* engine) {
 
 `T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the object it refers to. Only struct, array, `String` and interface types can be passed by reference. Interface parameters must be references (§5.3).
 
-The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them. A `String` value parameter is a copy too (§6.5); a `String*` parameter refers to the caller's string.
+The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
 
 The method receiver `this` is a reference to the object the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
 
@@ -754,7 +754,7 @@ switch (state) {
 
 An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values. A switch compares its subject with the case values, so the subject must be a value, not a reference (§6.9).
 
-A switch expression of a struct or array type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element, `this` or alias), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls, can be used anywhere. A switch expression of type `String` can be used anywhere: a branch that is an existing string is copied (§6.5).
+A switch expression of a struct, array or `String` type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element, `this` or alias), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls or string literals, can be used anywhere.
 
 `break` and `continue` inside a switch arm apply to the enclosing loop.
 
@@ -1083,7 +1083,7 @@ The initial language deliberately excludes:
 - Class and struct inheritance.
 - Garbage collection.
 - User-visible raw pointers.
-- Implicit copying, except for strings (§6.5) and value parameters (§7.3).
+- Implicit copying, except for value parameters (§7.3).
 - Implicit narrowing conversions.
 - Property syntactic sugar.
 - Implicit getter/setter generation.
