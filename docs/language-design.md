@@ -290,6 +290,8 @@ Other numeric conversions need an explicit cast, written as in Java: `(int) valu
 
 Numeric literals take their type from context. An integer literal can be used as any integer or floating-point type that represents its value exactly. A floating-point literal can be used as `float` or `float64`; it is rounded to the nearest `float` when used as `float`. A literal that doesn't fit its target type is a compile-time error. With no context, an integer literal is an `int` and a floating-point literal is a `float64`.
 
+The context of an operand is the other operand, or for an operation on two literals, the context of the whole expression: in `float x = 2 * 1.5;` both literals are `float`. Division and remainder between two integer literals are always integer operations, as in C and Java: `float64 half = 1 / 2;` gives `0.0`, and `float x = 1 / 2;` is an error because `int` doesn't convert to `float` implicitly.
+
 ### 6.4 Arithmetic and runtime errors
 
 Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2), and arithmetic produces a value of that type. Mixing signed and unsigned operands of the same width, or `int64` with `uint64`, needs a cast. Unary minus isn't allowed on unsigned types.
