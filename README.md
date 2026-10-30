@@ -30,5 +30,5 @@ Nirea is in the language-definition phase. There is no compiler yet; the first o
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.2, preliminary)
+- [Language design specification](docs/language-design.md) (v0.3, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors

@@ -1,7 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.2 — Initial Consolidated Design
+**Version:** 0.3 — Semantics for the first compiler
 **Status:** Preliminary Specification
+
+Version 0.3 resolves the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -98,6 +100,10 @@ void main() {
 }
 ```
 
+Functions, methods and constructors can't be overloaded: each name is declared once in its scope (§18). Functions can call each other regardless of declaration order, and recursion is allowed.
+
+A program has exactly one top-level `main` function, declared as `void main()` or `int main()`. The value returned by `int main()` is the process exit status.
+
 ### 5.2 Structs
 
 Nirea has one primary data abstraction: `struct`.
@@ -123,6 +129,10 @@ struct Vec2 {
 ```
 
 Structs are intended to support predictable native data layouts and low-level development.
+
+Fields are stored inline, in declaration order. A struct can't contain itself, directly or through other structs or arrays.
+
+Inside a method, fields and other methods of the same struct can be used by name, or through `this`: `this.x` and `x` are the same field. `this` is a non-owning reference to the value the method was called on (§7.3).
 
 ### 5.3 Interfaces
 
@@ -161,9 +171,64 @@ Design rules:
 - Abstract classes are not supported.
 - Multiple interface implementation is supported.
 
-Static and dynamic dispatch strategies remain to be specified.
+A struct implements an interface by declaring a public method with the same name, parameter types and return type for every method of the interface.
 
-## 6. Primitive types
+Interface types can be used only as parameter types. An interface-typed parameter is a non-owning reference to a struct value that implements the interface, and calls through it use dynamic dispatch. Any struct that implements the interface can be passed for it.
+
+```nirea
+void render(Drawable shape) {
+    shape.draw();
+}
+
+void main() {
+    Circle circle;
+    circle.radius = 2.0;
+    render(circle);
+}
+```
+
+Variables, fields, array elements and return values of interface type are not supported yet (§18).
+
+### 5.4 Constructors
+
+A struct can declare one constructor: a member named after the struct, with a parameter list and no return type. A constructor is called like a function, using the struct's name, and produces a new value. There is no `new` keyword: structs are values, not heap objects.
+
+```nirea
+struct Vec2 {
+    float x;
+    float y;
+
+    Vec2(float x, float y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+void main() {
+    Vec2 position = Vec2(1.5, 2.0);
+}
+```
+
+All fields hold their zero value (§6.8) before the constructor body runs, so no field is ever read uninitialised. A constructor can set private fields.
+
+A struct that declares no constructor can be created with `T()`, which produces a zero-initialised value. A declaration without an initialiser, such as `Vec2 v;`, is equivalent. For a struct that declares a constructor, both forms are errors: values of that type must come from its constructor.
+
+### 5.5 Constants
+
+Constants are declared with `const` at the top level of a file or inside a namespace.
+
+```nirea
+const int MAX_BUFFER_SIZE = 1024;
+const String APP_NAME = "Nirea";
+```
+
+A constant has a primitive, enum or `String` type. Its initialiser is a literal, a negated numeric literal or an enum value.
+
+There are no global variables. Mutable state lives in local variables and in the values they own.
+
+## 6. Types
+
+### 6.1 Primitive types
 
 Nirea provides a deliberately small set of built-in primitive types.
 
@@ -182,7 +247,9 @@ Nirea provides a deliberately small set of built-in primitive types.
 | `float`   | 32 bits         | IEEE 754 binary32        |
 | `float64` | 64 bits         | IEEE 754 binary64        |
 
-### Conversion rules
+`char` is an 8-bit type holding values 0 to 255. Unicode and UTF-8 string handling belong to library functionality rather than the primitive type system. `char` supports comparison and explicit casts to and from integer types, but no arithmetic.
+
+### 6.2 Conversion rules
 
 - No implicit signed-to-unsigned conversions.
 - No implicit narrowing conversions.
@@ -192,15 +259,111 @@ Nirea provides a deliberately small set of built-in primitive types.
 - `float` is always binary32.
 - `float64` is always binary64.
 
-Integer overflow behaviour must be explicitly specified.
+A conversion is implicit only when every value of the source type is exactly representable in the target type:
 
-`char` is an 8-bit type. Unicode and UTF-8 string handling belong to library functionality rather than the primitive type system.
+| From     | Converts implicitly to                                                  |
+| -------- | ----------------------------------------------------------------------- |
+| `int8`   | `int16`, `int`, `int64`, `float`, `float64`                             |
+| `int16`  | `int`, `int64`, `float`, `float64`                                      |
+| `int`    | `int64`, `float64`                                                      |
+| `uint8`  | `uint16`, `uint`, `uint64`, `int16`, `int`, `int64`, `float`, `float64` |
+| `uint16` | `uint`, `uint64`, `int`, `int64`, `float`, `float64`                    |
+| `uint`   | `uint64`, `int64`, `float64`                                            |
+| `float`  | `float64`                                                               |
+
+`int64`, `uint64` and `float64` convert to nothing else implicitly. `boolean`, `char`, enums and `String` never convert implicitly.
+
+Other numeric conversions need an explicit cast, written as in Java: `(int) value`. Casts are allowed between any two numeric types, and between `char` and integer types.
+
+- Integer-to-integer casts keep the low bits of the two's-complement representation, as in Java and C. For example, `(uint8) 300` is `44`.
+- Float-to-integer casts truncate toward zero. Casting NaN, an infinity or an out-of-range value is a runtime error (§6.4).
+- Conversions to a floating-point type round to the nearest representable value.
+
+### 6.3 Literals
+
+- Integer literals: decimal (`42`), hexadecimal (`0x2A`) and binary (`0b101010`). Underscores can separate digits (`1_000_000`). A decimal literal other than `0` can't start with `0`.
+- Floating-point literals have a fractional part, an exponent or both: `1.5`, `2.0e-3`, `1e9`.
+- Character literals: `'a'`, `'\n'`.
+- String literals: `"text"`.
+- Boolean literals: `true` and `false`.
+- Escape sequences in character and string literals: `\n`, `\t`, `\r`, `\0`, `\\`, `\'`, `\"` and `\xHH`.
+
+Numeric literals take their type from context. An integer literal can be used as any integer or floating-point type that represents its value exactly. A floating-point literal can be used as `float` or `float64`; it is rounded to the nearest `float` when used as `float`. A literal that doesn't fit its target type is a compile-time error. With no context, an integer literal is an `int` and a floating-point literal is a `float64`.
+
+### 6.4 Arithmetic and runtime errors
+
+Arithmetic and comparison operators need operands of the same type after implicit conversion (§6.2), and arithmetic produces a value of that type. Mixing signed and unsigned operands of the same width, or `int64` with `uint64`, needs a cast. Unary minus isn't allowed on unsigned types.
+
+Integer overflow is a runtime error. So are:
+
+- division or remainder by zero, and dividing the smallest signed value by `-1`;
+- shifting by a negative amount, or by at least the width of the shifted type;
+- an array index out of range (§6.6);
+- an invalid float-to-integer cast (§6.2).
+
+A runtime error stops the program immediately, with a message naming the error and its source location and a non-zero exit status. It can't be caught; recoverable error handling is an open question (§18).
+
+`<<` shifts in zeros and discards the bits shifted out; it isn't checked for overflow. `>>` is an arithmetic shift for signed types and a logical shift for unsigned types. The shift amount can have any integer type. `&`, `|`, `^` and `~` work on integer types.
+
+Floating-point arithmetic follows IEEE 754: division by zero produces an infinity or NaN and isn't an error. `%` on floating-point values gives a remainder with the sign of the dividend, like C's `fmod`.
+
+### 6.5 Strings
+
+`String` is a built-in, immutable string type. In this version a `String` value is always a string literal, or a constant initialised from one: a fixed sequence of bytes in static storage. Strings aren't owned, so like primitive values they're copied when assigned or passed.
+
+`==` and `!=` compare string contents. Strings can be printed (§15) and passed to C functions (§14). Building, concatenating and inspecting strings is left to a future library (§15, §18).
+
+### 6.6 Arrays
+
+An array type `T[N]` holds exactly `N` elements of type `T`, stored inline. `N` is an integer literal or integer constant greater than zero.
+
+```nirea
+int[4] values;                                     // all elements are 0
+int[3] primes = {2, 3, 5};
+Vec2[2] corners = {Vec2(0.0, 0.0), Vec2(1.0, 1.0)};
+int[2][3] grid;                                    // 2 rows of 3 ints
+
+values[0] = 10;
+int count = values.length;                         // 4
+grid[1][2] = 7;
+```
+
+- An array initialiser `{...}` lists exactly `N` elements. It can be used only to initialise a variable declaration.
+- `a[i]` accesses an element. The index can have any integer type. An index outside `0` to `N - 1` is a runtime error.
+- `a.length` is the number of elements, as an `int`.
+- `T[A][B]` is an array of `A` elements of type `T[B]`.
+- Arrays are owned values, like structs: assignment moves them and `copy()` copies them (§7).
+- Arrays can be local variables, fields, parameters (passed by reference, §7.3) and return values.
+
+### 6.7 Enums
+
+Enums are simple named values. Variants with associated data are an open question (§18).
+
+```nirea
+enum State {
+    IDLE,
+    RUNNING,
+    STOPPED
+}
+```
+
+Enum values are written qualified with the enum name, such as `State.IDLE`, except in the `case` labels of a switch on that enum (§10.1). Enums support `==` and `!=`. They aren't owned, so they're copied like primitive values. Printing an enum value prints its name.
+
+### 6.8 Zero values
+
+Every type has a zero value: `0` for numbers, `false` for `boolean`, `'\0'` for `char`, `""` for `String`, the first value for an enum, all fields zero for a struct and all elements zero for an array.
+
+A local variable declared without an initialiser holds its type's zero value, except for struct types that declare a constructor (§5.4). Struct fields and array elements always start at their zero value. No value can be read uninitialised.
 
 ## 7. Ownership and memory safety
 
 Memory safety is one of Nirea's fundamental design principles.
 
 Nirea uses exclusive ownership: every owned object has exactly one owner at a time.
+
+Values of struct and array types are owned. Values of primitive types, enums and `String` are plain values: assigning or passing them copies them, and the ownership rules below don't apply to them.
+
+The owner of a value is a local variable, a field of another owned value, or an element of an owned array.
 
 ### 7.1 Ownership transfer
 
@@ -215,6 +378,32 @@ Engine second = first;
 
 The compiler prevents subsequent access through the previous owner.
 
+Ownership moves when a local variable is used as:
+
+- the initialiser of a variable declaration: `Engine second = first;`
+- the right-hand side of an assignment to a variable, field or array element: `vehicle.engine = first;`
+- the value of a `return` statement: `return first;`
+- an element of an array initialiser, or the value of a switch-expression arm (§10.1) used in one of these positions.
+
+Only a whole local variable can be moved. An object owned by another object, or borrowed by a function, can't change owner: fields, array elements, parameters, `this` and aliases can't be moved out of. To get an independent value from one of them, call `copy()`:
+
+```nirea
+Engine spare = vehicle.engine;          // error: can't move out of a field
+Engine spare = vehicle.engine.copy();   // ok
+```
+
+The compiler tracks moves through all control flow. Using a variable that has been moved, or may have been moved on some path, is a compile-time error. Assigning a new value to a moved variable makes it usable again.
+
+```nirea
+Engine first = createEngine();
+if (ready) {
+    Engine second = first;
+}
+println(first.getPower());   // error: first may have been moved
+```
+
+A value produced by a call, such as `createEngine()` or `first.copy()`, has no other owner, so it can be used in any of these positions.
+
 ### 7.2 Explicit copying
 
 Copying must be requested explicitly.
@@ -226,7 +415,7 @@ Engine second = first.copy();
 
 `copy()` creates an independent object.
 
-Copying semantics, including nested owned objects, must be defined. Types may eventually provide their own copying behaviour.
+`copy()` is built in for every struct and array type, and makes a deep copy: owned fields and elements are copied too. A struct can't declare its own method named `copy`; type-defined copying is an open question (§18).
 
 ### 7.3 Non-owning references
 
@@ -246,13 +435,25 @@ void main() {
 }
 ```
 
-Function parameters are intended to be non-owning by default.
+Functions never take ownership of their arguments. Parameters of struct and array types are non-owning references to the caller's value. The function can read and write fields and elements and call methods, and the caller sees the changes. Parameters of primitive types, enums and `String` are passed by value. The method receiver `this` is a non-owning reference in the same way.
 
-Ownership transfer must be distinguishable from ordinary access through explicit language semantics.
+A function can't move a parameter, or assign to a struct or array parameter as a whole. To keep a value it receives, it stores a copy:
 
-There is no mandatory `borrow` keyword.
+```nirea
+struct Vehicle {
+    Engine engine;
 
-References must not outlive their referenced objects.
+    void setEngine(Engine engine) {
+        this.engine = engine.copy();
+    }
+}
+```
+
+Ownership leaves a function only through its return value. An argument that is a call result, such as `inspect(createEngine())`, is owned by the calling statement and lives until that statement ends.
+
+Because calls never transfer ownership, transfer never has to be marked at a call site. There is no `borrow` keyword, and no `move` keyword.
+
+References must not outlive their referenced objects. References exist only as parameters, `this` and aliases (§9), none of which can outlive the value they refer to.
 
 Raw pointers are not exposed in ordinary Nirea code.
 
@@ -280,6 +481,8 @@ The previous object must be properly destroyed, including its owned resources.
 
 The compiler must prevent invalid outstanding references.
 
+In this version no type owns memory or operating-system resources, so destroying a value has no observable effect (§7.6).
+
 ### 7.6 Resource lifecycle
 
 Nirea requires deterministic resource cleanup.
@@ -292,7 +495,7 @@ The lifecycle system must account for:
 - Operating-system resources.
 - Native resources acquired through C libraries.
 
-Destructor syntax and execution order remain to be specified.
+Destructor syntax and execution order remain to be specified. Until they are, all values are plain data: no type can own allocated memory, file handles or other resources.
 
 ## 8. Struct encapsulation
 
@@ -315,6 +518,8 @@ struct Engine {
 ```
 
 Member visibility is public by default, with `private` available for encapsulation.
+
+`private` applies to fields and methods. A private member can be used only inside the methods and constructor of its struct, on any value of that struct type.
 
 Operations remain explicit and visible in source code.
 
@@ -352,6 +557,8 @@ Aliases can refer to mutable locations when the underlying expression is assigna
 
 A method call returning a value is not automatically an assignable location.
 
+An alias's expression is resolved where the alias is declared, and evaluated again at each use. Following rule 6, an alias can't be the source of an ownership transfer: `Engine other = engine;` is an error when `engine` is an alias.
+
 ## 10. Control flow
 
 Nirea retains familiar C/Java-style loops and control statements.
@@ -366,6 +573,14 @@ Initial constructs:
 - `break`
 - `continue`
 - `return`
+
+`for` loops have the Java and C form: `for (int i = 0; i < count; i++) { ... }`. Conditions must have type `boolean`; numbers don't convert to `boolean`.
+
+Expressions are evaluated left to right, including function arguments. `&&` and `||` evaluate their right operand only when needed.
+
+Assignment (`=` and compound assignments such as `+=`), `++` and `--` are statements, not expressions, so they can't be nested inside other expressions.
+
+A function with a non-`void` return type must return a value on every path.
 
 ### 10.1 Switch expressions
 
@@ -387,6 +602,19 @@ String describe(State state) {
 }
 ```
 
+Switch can also be used as a statement. A statement arm is a single statement or a block:
+
+```nirea
+switch (state) {
+    case IDLE -> println("Idle");
+    case RUNNING, STOPPED -> {
+        println("Busy");
+    }
+}
+```
+
+An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. `break` and `continue` inside a switch arm apply to the enclosing loop.
+
 ### 10.2 Exhaustiveness
 
 Every switch must be exhaustive.
@@ -395,6 +623,7 @@ Every switch must be exhaustive.
 - Closed sets of variants must be fully covered.
 - A `default` branch can handle remaining values.
 - Integer switches require a `default` branch.
+- Character and string switches require a `default` branch.
 - Boolean switches must cover both values unless a default exists.
 - Duplicate cases are compilation errors.
 
@@ -453,6 +682,9 @@ void main() {
 - Namespaces do not introduce runtime objects.
 - Namespaces are independent of filesystem directories.
 - Namespace declarations do not imply nested namespace hierarchies.
+- Namespaces can't be nested, and each namespace is declared once in a program.
+- Inside a namespace, its own members can be used without the namespace prefix.
+- A namespace can contain `extern "C"` blocks (§14).
 
 Namespaces replace the need for static classes and static methods.
 
@@ -524,6 +756,14 @@ import Audio.ni;
 
 Importing a file does not automatically merge its namespace with the importing source file.
 
+Resolution:
+
+- A path starting with `./` or `../` is relative to the importing file.
+- Any other path is looked up both relative to the importing file's directory and relative to the source root. If both exist and are different files, the import is ambiguous, which is an error. If neither exists, the import is unresolved.
+- Imports aren't transitive: a file sees its own declarations and the declarations of the files it imports directly.
+- Importing the same file again has no further effect. Circular imports are allowed.
+- Every `.ni` file under the source root is part of the program, and top-level names must be unique across the whole program.
+
 ## 13. Native compilation
 
 Nirea is designed for ahead-of-time native compilation.
@@ -588,19 +828,35 @@ Nirea is designed to integrate with existing C libraries and functions.
 
 It should be possible to declare and call external C functions directly.
 
-Illustrative syntax:
+An `extern "C"` block declares C functions that Nirea code can call. It can appear at the top level of a file or inside a namespace.
 
 ```nirea
 extern "C" {
-    int printf(char* format, ...);
+    int printf(String format, ...);
+    float64 sqrt(float64 x);
 }
 
 void main() {
     printf("Hello from Nirea!\n");
+    printf("%d\n", 42);
 }
 ```
 
-The exact FFI syntax and pointer representation remain to be specified.
+Parameter types can be primitive types and `String`. Return types can be primitive types or `void`. A final `...` declares a variadic function; variadic arguments must be primitives or strings. Types map to C as follows:
+
+| Nirea                               | C                                             |
+| ----------------------------------- | --------------------------------------------- |
+| `boolean`                           | `bool`                                        |
+| `char`                              | `char`                                        |
+| `int8`, `int16`, `int`, `int64`     | `int8_t`, `int16_t`, `int32_t`, `int64_t`     |
+| `uint8`, `uint16`, `uint`, `uint64` | `uint8_t`, `uint16_t`, `uint32_t`, `uint64_t` |
+| `float`, `float64`                  | `float`, `double`                             |
+| `String`                            | `const char *`, null-terminated               |
+| `void`                              | `void`                                        |
+
+The compiler can't check that a declaration matches the real C function. A wrong declaration has undefined behaviour, which is why the C boundary is an explicit safety boundary.
+
+Struct, array, pointer and callback types at the C boundary remain to be specified (§18).
 
 ### Interoperability goals
 
@@ -638,6 +894,8 @@ Potential areas:
 
 The compiler and runtime should remain as small as reasonably possible.
 
+Until a standard library exists, the compiler provides two built-in functions for output: `print(value)` and `println(value)`. They accept one value of a primitive, enum or `String` type, and `println()` with no argument prints an empty line. Floating-point values print in their shortest form that reads back as the same value, always with a decimal point or exponent (`1.0`, `0.1`, `1.0E10`).
+
 ## 16. Project management and build structure
 
 Nirea adopts Maven-inspired project organisation.
@@ -653,7 +911,7 @@ The initial project convention uses:
 
 Maven-style project coordinates and dependency management are intended to provide a familiar development experience.
 
-Whether Nirea will use Maven directly or introduce a dedicated build tool remains open.
+Whether Nirea will use Maven directly or introduce a dedicated build tool remains open. The first compiler builds a project from `src/main/nirea` into `target/`, and doesn't read `pom.xml` yet.
 
 ## 17. Explicit non-goals
 
@@ -680,25 +938,24 @@ The goal is not to maximise language features, but to make a small set of featur
 
 The following decisions require further specification.
 
-| Area         | Question                                                     |
-| ------------ | ------------------------------------------------------------ |
-| Ownership    | Exact syntax for explicit ownership transfer into functions  |
-| References   | How are mutable and read-only references distinguished?      |
-| Lifetimes    | How are references stored inside structs checked?            |
-| Copying      | Shallow, deep or type-defined copy semantics?                |
-| Destruction  | Destructor syntax and execution order                        |
-| Mutability   | How is object mutation distinguished from field replacement? |
-| Constructors | Struct initialisation and construction                       |
-| Generics     | Whether generics are included initially                      |
-| Enums        | Simple named values or associated data variants              |
-| Strings      | Built-in string representation                               |
-| FFI          | Exact C declaration and pointer boundary syntax              |
-| Modules      | Duplicate declarations and visibility across files           |
-| ABI          | Native calling conventions and data layouts                  |
-| Errors       | Error handling and exceptional conditions                    |
-| Concurrency  | Ownership and thread-safety rules                            |
-| Interfaces   | Static and dynamic dispatch semantics                        |
-| Imports      | Exact duplicate import and resolution behaviour              |
+| Area        | Question                                                                      |
+| ----------- | ----------------------------------------------------------------------------- |
+| References  | Whether read-only references are needed once types can own heap resources     |
+| Lifetimes   | How references stored inside structs would be checked, if they are allowed    |
+| Copying     | Type-defined copy behaviour                                                   |
+| Destruction | Destructor syntax and execution order                                         |
+| Mutability  | How is object mutation distinguished from field replacement?                  |
+| Overloading | Whether functions, methods and constructors can be overloaded                 |
+| Generics    | Whether generics are included initially                                       |
+| Enums       | Variants with associated data                                                 |
+| Strings     | Owned, growable strings and text processing                                   |
+| Arrays      | Dynamically sized arrays and slices                                           |
+| FFI         | Struct, array, pointer and callback types at the C boundary                   |
+| Modules     | Per-file private declarations, and reopening a namespace in several places    |
+| ABI         | Native calling conventions and data layouts                                   |
+| Errors      | Recoverable error handling                                                    |
+| Concurrency | Ownership and thread-safety rules                                             |
+| Interfaces  | Owned interface values (variables, fields, return values) and static dispatch |
 
 ## 19. Development roadmap
 
@@ -761,3 +1018,80 @@ A small, readable, memory-safe language combining Java-inspired syntax, C's dire
 **Guiding principle:**
 
 Explicit code. Simple abstractions. Native execution. Safety by design.
+
+## Appendix A. Grammar
+
+This grammar describes the language as specified in version 0.3. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+
+```text
+file           = { import } { topDecl } ;
+import         = "import" IMPORT_PATH ";" ;
+topDecl        = namespaceDecl | decl ;
+namespaceDecl  = "namespace" IDENT "{" { decl } "}" ;
+decl           = functionDecl | structDecl | interfaceDecl | enumDecl
+               | constDecl | externBlock ;
+
+functionDecl   = returnType IDENT "(" [ params ] ")" block ;
+params         = param { "," param } ;
+param          = type IDENT ;
+returnType     = "void" | type ;
+
+structDecl     = "struct" IDENT [ ":" typeName { "," typeName } ] "{" { member } "}" ;
+member         = [ "private" ] type IDENT ";"                          (* field *)
+               | [ "private" ] returnType IDENT "(" [ params ] ")" block   (* method *)
+               | IDENT "(" [ params ] ")" block ;                      (* constructor *)
+interfaceDecl  = "interface" IDENT "{" { returnType IDENT "(" [ params ] ")" ";" } "}" ;
+enumDecl       = "enum" IDENT "{" IDENT { "," IDENT } [ "," ] "}" ;
+constDecl      = "const" type IDENT "=" constValue ";" ;
+constValue     = [ "-" ] literal | typeName "." IDENT ;
+externBlock    = "extern" STRING "{" { externFunction } "}" ;
+externFunction = returnType IDENT "(" [ externParams ] ")" ";" ;
+externParams   = "..." | param { "," param } [ "," "..." ] ;
+
+type           = baseType { "[" arraySize "]" } ;
+baseType       = primitiveType | "String" | typeName ;
+primitiveType  = "boolean" | "char" | "int8" | "int16" | "int" | "int64"
+               | "uint8" | "uint16" | "uint" | "uint64" | "float" | "float64" ;
+typeName       = IDENT [ "." IDENT ] ;
+arraySize      = INTEGER | typeName ;                                  (* integer constant *)
+
+block          = "{" { statement } "}" ;
+statement      = block | varDecl | aliasDecl | ifStmt | whileStmt | doStmt | forStmt
+               | switchStmt | "break" ";" | "continue" ";" | "return" [ expr ] ";"
+               | simpleStmt ";" ;
+varDecl        = type IDENT [ "=" initialiser ] ";" ;
+initialiser    = expr | "{" initialiser { "," initialiser } [ "," ] "}" ;
+aliasDecl      = "alias" IDENT "=" expr ";" ;
+simpleStmt     = expr [ assignOp expr | "++" | "--" ] | ( "++" | "--" ) expr ;
+assignOp       = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
+ifStmt         = "if" "(" expr ")" statement [ "else" statement ] ;
+whileStmt      = "while" "(" expr ")" statement ;
+doStmt         = "do" statement "while" "(" expr ")" ";" ;
+forStmt        = "for" "(" [ forInit ] ";" [ expr ] ";" [ simpleStmt ] ")" statement ;
+forInit        = type IDENT "=" expr | simpleStmt ;
+switchStmt     = "switch" "(" expr ")" "{" { switchLabel "->" statement } "}" ;
+switchLabel    = "case" caseValue { "," caseValue } | "default" ;
+caseValue      = IDENT | [ "-" ] INTEGER | CHARACTER | STRING | "true" | "false" ;
+
+expr           = orExpr ;
+orExpr         = andExpr { "||" andExpr } ;
+andExpr        = bitOrExpr { "&&" bitOrExpr } ;
+bitOrExpr      = bitXorExpr { "|" bitXorExpr } ;
+bitXorExpr     = bitAndExpr { "^" bitAndExpr } ;
+bitAndExpr     = equalityExpr { "&" equalityExpr } ;
+equalityExpr   = relationalExpr { ( "==" | "!=" ) relationalExpr } ;
+relationalExpr = shiftExpr { ( "<" | "<=" | ">" | ">=" ) shiftExpr } ;
+shiftExpr      = additiveExpr { ( "<<" | ">>" ) additiveExpr } ;
+additiveExpr   = multiplicativeExpr { ( "+" | "-" ) multiplicativeExpr } ;
+multiplicativeExpr = unaryExpr { ( "*" | "/" | "%" ) unaryExpr } ;
+unaryExpr      = ( "-" | "!" | "~" ) unaryExpr
+               | "(" primitiveType ")" unaryExpr                       (* cast *)
+               | postfixExpr ;
+postfixExpr    = primary { "." IDENT | "[" expr "]" | "(" [ args ] ")" } ;
+args           = expr { "," expr } ;
+primary        = literal | IDENT | "this" | "(" expr ")" | switchExpr ;
+switchExpr     = "switch" "(" expr ")" "{" { switchLabel "->" expr ";" } "}" ;
+literal        = INTEGER | FLOAT | CHARACTER | STRING | "true" | "false" ;
+```
+
+`IMPORT_PATH` is the text between `import` and `;`, with surrounding whitespace removed. A statement that starts with `switch` is a switch statement. A statement that starts with a type followed by an identifier is a variable declaration.

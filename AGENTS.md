@@ -14,7 +14,7 @@ The project is in **Phase 1: Language definition** (spec §19). There is no comp
 AGENTS.md                  this file
 README.md                  project overview
 docs/
-└── language-design.md     language design specification (v0.2, preliminary)
+└── language-design.md     language design specification (v0.3, preliminary)
 ```
 
 Update the layout above and add build/test commands here as code arrives.
@@ -23,7 +23,7 @@ Update the layout above and add build/test commands here as code arrives.
 
 - `docs/language-design.md` defines the language. Read the relevant sections before writing or changing anything about the language: docs, examples or, later, compiler code.
 - Do not invent semantics for anything in §18 (Open design questions). If a task depends on an open question, say so. Either ask, or propose a resolution as an explicit spec change.
-- Some examples touch unresolved areas and are illustrative only. Examples: `String` in §10.1 (strings are open), `char*` in the FFI example in §14 (pointer syntax is open), and `Audio.AudioEngine engine;` without an initialiser in §11 (constructors are open).
+- Appendix A holds the grammar. Keep it in sync with the prose and with the parser.
 
 ## Changing the specification
 
