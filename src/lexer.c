@@ -262,9 +262,16 @@ static void lex_number(Lexer *lx, Loc loc) {
         uint64_t value = 0;
         bool overflow = false;
         int digits = 0;
+        bool prev_digit = false;
         while (is_ident_char(peek(lx))) {
             char c = advance(lx);
-            if (c == '_') continue;
+            if (c == '_') {
+                int next_value = hex_value(peek(lx));
+                if (!prev_digit || next_value < 0 || next_value >= base) error_at(loc, "'_' must separate digits");
+                prev_digit = false;
+                continue;
+            }
+            prev_digit = true;
             int d = hex_value(c);
             if (d < 0 || d >= base) {
                 error_at(loc, "invalid digit '%c' in %s literal", c, base == 16 ? "hexadecimal" : "binary");
@@ -321,6 +328,8 @@ static void lex_number(Lexer *lx, Loc loc) {
     if (is_float) {
         Token *t = push(lx, TOK_FLOAT, loc);
         t->float_value = strtod(text, NULL);
+        t->text = intern(text, strlen(text));
+        t->text_len = strlen(text);
     } else {
         if (text[0] == '0' && text[1] != '\0') error_at(loc, "a decimal literal can't start with '0'");
         uint64_t value = 0;

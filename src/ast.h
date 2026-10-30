@@ -223,6 +223,9 @@ struct Expr {
     Decl *iface_impl_struct; /* E_TO_IFACE: struct being converted */
     bool transfers_ownership; /* E_VAR whose object goes to a new owner */
     bool literal_untyped;    /* literal whose type came from the default, not context */
+    bool untyped_literal;    /* literal, or arithmetic on literals only (set by the parser) */
+    bool int_literal;        /* the same, with integer literals only */
+    int depth;               /* height of the expression tree, to bound recursion */
 };
 
 /* ---- Statements ---- */

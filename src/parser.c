@@ -3,11 +3,16 @@
 #include <setjmp.h>
 #include <string.h>
 
+/* Bounds on nesting, so that deeply nested input can't exhaust the stack in
+ * the recursive passes. */
+#define MAX_NESTING 1000
+
 typedef struct Parser {
     SourceFile *file;
     Token *toks;
     int pos;
     int count;
+    int nesting;
     jmp_buf bail;
 } Parser;
 
@@ -120,8 +125,13 @@ static bool at_declaration(Parser *p) {
     int end = scan_type(p, p->pos);
     if (end < 0) return false;
     if (p->toks[end].kind == TOK_IDENT) return true;
-    /* `Engine* e = ...;` or `Engine* e;`: a reference variable, rejected later */
-    return p->toks[end].kind == TOK_STAR && p->toks[end + 1].kind == TOK_IDENT &&
+    /* `Engine* e = ...;` or `Engine* e;` is a reference variable, rejected
+     * later. Type names are PascalCase (spec 4), which tells it apart from a
+     * multiplication such as `y * z;`. */
+    Token *first = &p->toks[p->pos];
+    bool looks_like_type = primitive_for(first->kind) || (first->kind == TOK_IDENT && first->text[0] >= 'A' &&
+                                                          first->text[0] <= 'Z');
+    return looks_like_type && p->toks[end].kind == TOK_STAR && p->toks[end + 1].kind == TOK_IDENT &&
            (p->toks[end + 2].kind == TOK_ASSIGN || p->toks[end + 2].kind == TOK_SEMI);
 }
 
@@ -181,7 +191,37 @@ static Expr *new_expr(ExprKind kind, Loc loc) {
     Expr *e = NEW(Expr);
     e->kind = kind;
     e->loc = loc;
+    e->depth = 1;
+    if (kind == E_INT || kind == E_FLOAT) {
+        e->untyped_literal = true;
+        e->int_literal = kind == E_INT;
+    }
     return e;
+}
+
+/* Records the tree height of e from its children and rejects excessive depth. */
+static Expr *finish_expr(Parser *p, Expr *e) {
+    int depth = 0;
+    if (e->base && e->base->depth > depth) depth = e->base->depth;
+    if (e->index && e->index->depth > depth) depth = e->index->depth;
+    for (int i = 0; i < e->args.len; i++) {
+        if (e->args.data[i]->depth > depth) depth = e->args.data[i]->depth;
+    }
+    e->depth = depth + 1;
+    if (e->depth > MAX_NESTING) {
+        fail_at(p, e->loc, fmt_str("expression is too complex: more than %d nested operations", MAX_NESTING));
+    }
+    return e;
+}
+
+static void enter(Parser *p) {
+    if (++p->nesting > MAX_NESTING) {
+        fail_at(p, cur(p)->loc, fmt_str("code is nested too deeply: more than %d levels", MAX_NESTING));
+    }
+}
+
+static void leave(Parser *p) {
+    p->nesting--;
 }
 
 static Expr *parse_expr(Parser *p);
@@ -283,6 +323,7 @@ static Expr *parse_primary(Parser *p) {
     }
     case TOK_FLOAT: {
         Expr *e = new_expr(E_FLOAT, t->loc);
+        e->str = t->text;
         e->float_value = next(p)->float_value;
         return e;
     }
@@ -342,14 +383,14 @@ static Expr *parse_postfix(Parser *p) {
             Expr *m = new_expr(E_MEMBER, loc);
             m->base = e;
             m->name = expect_ident(p, "a member name after '.'");
-            e = m;
+            e = finish_expr(p, m);
         } else if (at(p, TOK_LBRACKET)) {
             Loc loc = next(p)->loc;
             Expr *ix = new_expr(E_INDEX, loc);
             ix->base = e;
             ix->index = parse_expr(p);
             expect(p, TOK_RBRACKET);
-            e = ix;
+            e = finish_expr(p, ix);
         } else if (at(p, TOK_LPAREN)) {
             Loc loc = next(p)->loc;
             Expr *call = new_expr(E_CALL, loc);
@@ -360,7 +401,7 @@ static Expr *parse_postfix(Parser *p) {
                 } while (accept(p, TOK_COMMA));
             }
             expect(p, TOK_RPAREN);
-            e = call;
+            e = finish_expr(p, call);
         } else if (at(p, TOK_PLUSPLUS) || at(p, TOK_MINUSMINUS)) {
             return e; /* handled by the statement parser */
         } else {
@@ -369,7 +410,16 @@ static Expr *parse_postfix(Parser *p) {
     }
 }
 
+static Expr *parse_unary_inner(Parser *p);
+
 static Expr *parse_unary(Parser *p) {
+    enter(p);
+    Expr *e = parse_unary_inner(p);
+    leave(p);
+    return e;
+}
+
+static Expr *parse_unary_inner(Parser *p) {
     Token *t = cur(p);
     if (t->kind == TOK_MINUS && (peek_tok(p, 1)->kind == TOK_INT || peek_tok(p, 1)->kind == TOK_FLOAT)) {
         /* Negative literal, so that e.g. -2147483648 fits int. */
@@ -381,6 +431,7 @@ static Expr *parse_unary(Parser *p) {
             Expr *e = new_expr(lit->kind == TOK_INT ? E_INT : E_FLOAT, t->loc);
             e->int_value = lit->int_value;
             e->float_value = -lit->float_value;
+            e->str = lit->text;
             e->negative = true;
             return e;
         }
@@ -390,7 +441,11 @@ static Expr *parse_unary(Parser *p) {
         Expr *e = new_expr(E_UNARY, t->loc);
         e->op = t->kind;
         e->base = parse_unary(p);
-        return e;
+        if (e->op == TOK_MINUS) {
+            e->untyped_literal = e->base->untyped_literal;
+            e->int_literal = e->base->int_literal;
+        }
+        return finish_expr(p, e);
     }
     if (t->kind == TOK_PLUSPLUS || t->kind == TOK_MINUSMINUS) {
         fail_at(p, t->loc, fmt_str("%s is a statement and can't be used inside an expression", token_kind_name(t->kind)));
@@ -403,7 +458,7 @@ static Expr *parse_unary(Parser *p) {
         e->cast_expr = te;
         e->cast_type = te->prim;
         e->base = parse_unary(p);
-        return e;
+        return finish_expr(p, e);
     }
     return parse_postfix(p);
 }
@@ -444,7 +499,11 @@ static Expr *parse_binary(Parser *p, int min_prec) {
         e->op = op;
         e->base = left;
         e->index = right;
-        left = e;
+        if (op == TOK_PLUS || op == TOK_MINUS || op == TOK_STAR || op == TOK_SLASH || op == TOK_PERCENT) {
+            e->untyped_literal = left->untyped_literal && right->untyped_literal;
+            e->int_literal = left->int_literal && right->int_literal;
+        }
+        left = finish_expr(p, e);
     }
 }
 
@@ -454,6 +513,7 @@ static Expr *parse_expr(Parser *p) {
 
 static Expr *parse_initialiser(Parser *p) {
     if (at(p, TOK_LBRACE)) {
+        enter(p);
         Expr *e = new_expr(E_ARRAY_INIT, next(p)->loc);
         if (!at(p, TOK_RBRACE)) {
             do {
@@ -462,6 +522,7 @@ static Expr *parse_initialiser(Parser *p) {
             } while (accept(p, TOK_COMMA));
         }
         expect(p, TOK_RBRACE);
+        leave(p);
         return e;
     }
     return parse_expr(p);
@@ -560,7 +621,16 @@ static Stmt *parse_block(Parser *p) {
     return s;
 }
 
+static Stmt *parse_statement_inner(Parser *p);
+
 static Stmt *parse_statement(Parser *p) {
+    enter(p);
+    Stmt *s = parse_statement_inner(p);
+    leave(p);
+    return s;
+}
+
+static Stmt *parse_statement_inner(Parser *p) {
     Token *t = cur(p);
     switch (t->kind) {
     case TOK_LBRACE:

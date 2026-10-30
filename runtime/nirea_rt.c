@@ -71,25 +71,45 @@ static void print_float(double v, int max_digits, bool is_f32) {
         return;
     }
 
-    /* Shortest digit string that round-trips. */
-    char buf[64];
+    /* Find the shortest digit string that reads back as v. For each length,
+     * try the correctly rounded decimal and its neighbours one unit away in
+     * the last digit: near powers of two the rounding interval is lopsided,
+     * so a neighbour can round-trip when the nearest doesn't. Among
+     * round-tripping candidates of the shortest length, take the closest. */
+    bool negative = v < 0;
+    double mag = negative ? -v : v;
+    char digits[40] = "0";
+    int exponent = 0;
     for (int precision = 1; precision <= max_digits; precision++) {
-        snprintf(buf, sizeof buf, "%.*e", precision - 1, v);
-        double back = strtod(buf, NULL);
-        if (is_f32 ? (float)back == (float)v : back == v) break;
+        char buf[64];
+        snprintf(buf, sizeof buf, "%.*e", precision - 1, mag);
+        uint64_t mantissa = 0;
+        const char *p = buf;
+        for (; *p && *p != 'e'; p++) {
+            if (*p != '.') mantissa = mantissa * 10 + (uint64_t)(*p - '0');
+        }
+        int exp10 = atoi(p + 1) - (precision - 1); /* value = mantissa * 10^exp10 */
+        bool found = false;
+        long double best_error = 0;
+        for (int delta = -1; delta <= 1; delta++) {
+            if (mantissa == 0 && delta < 0) continue;
+            uint64_t m = mantissa + (uint64_t)(int64_t)delta;
+            char cand[64];
+            snprintf(cand, sizeof cand, "%" PRIu64 "e%d", m, exp10);
+            bool same = is_f32 ? strtof(cand, NULL) == (float)mag : strtod(cand, NULL) == mag;
+            if (!same) continue;
+            long double diff = (long double)m * powl(10.0L, exp10) - (long double)mag;
+            long double error = diff < 0 ? -diff : diff;
+            if (!found || error < best_error) {
+                found = true;
+                best_error = error;
+                snprintf(digits, sizeof digits, "%" PRIu64, m);
+                exponent = exp10 + (int)strlen(digits) - 1;
+            }
+        }
+        if (found) break;
     }
-
-    /* buf is [-]d[.ddd]e[+-]XX */
-    bool negative = buf[0] == '-';
-    const char *p = buf + (negative ? 1 : 0);
-    char digits[40];
-    int ndigits = 0;
-    while (*p && *p != 'e') {
-        if (*p != '.') digits[ndigits++] = *p;
-        p++;
-    }
-    digits[ndigits] = '\0';
-    int exponent = atoi(p + 1);
+    int ndigits = (int)strlen(digits);
     while (ndigits > 1 && digits[ndigits - 1] == '0') digits[--ndigits] = '\0';
 
     if (negative) putchar('-');

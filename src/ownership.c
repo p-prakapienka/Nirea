@@ -84,23 +84,53 @@ static Var *call_param(Expr *call, int i) {
     return fn->params.data[i];
 }
 
-/* A call can't take a local by value while it also refers to that local
- * through the receiver or a reference parameter. */
-static void check_reference_and_transfer(Expr *call) {
-    if (error_suppress > 0) return;
-    for (int i = 0; i < call->args.len; i++) {
-        Expr *arg = call->args.data[i];
-        if (arg->kind != E_VAR || !arg->transfers_ownership) continue;
-        bool referenced = false;
-        if ((call->kind == E_CALL_METHOD || call->kind == E_CALL_IFACE) && root_var(call->base) == arg->var) referenced = true;
-        for (int j = 0; j < call->args.len && !referenced; j++) {
-            if (j == i) continue;
-            Var *p = call_param(call, j);
-            Expr *other = call->args.data[j];
-            if (p && (p->is_ref || p->type->kind == TY_INTERFACE) && root_var(other) == arg->var) referenced = true;
+/* Reports a local that a call or assignment refers to (as receiver,
+ * reference argument or assignment target) but that gave its object to a new
+ * owner while the call's arguments or the assigned value were evaluated
+ * (spec 7.3). before is the state just after the reference was taken. */
+static void check_still_owned(OCtx *c, Var *v, State *before, State *after, Loc fallback, const char *what) {
+    if (!v || !tracked(v) || !before->reachable || !after->reachable) return;
+    if (before->v[v->index] != OWNS || after->v[v->index] == OWNS) return;
+    Loc loc = c->transfer_loc[v->index].file ? c->transfer_loc[v->index] : fallback;
+    error_at(loc, "'%s' can't be given to a new owner while %s refers to it", v->name, what);
+}
+
+static Var *call_reference_root(Expr *call, int i) {
+    Var *p = call_param(call, i);
+    if (!p || !(p->is_ref || p->type->kind == TY_INTERFACE)) return NULL;
+    return root_var(call->args.data[i]);
+}
+
+/* True if every value e can produce is a new object (a call result), never
+ * an existing object that would have to be copied. */
+static bool is_new_object(Expr *e) {
+    switch (e->kind) {
+    case E_CALL_FUNC:
+    case E_CALL_METHOD:
+    case E_CALL_IFACE:
+    case E_CALL_CTOR:
+    case E_COPY: return true;
+    case E_SWITCH:
+        for (int i = 0; i < e->sw->arms.len; i++) {
+            if (!is_new_object(e->sw->arms.data[i].expr)) return false;
         }
-        if (referenced) {
-            error_at(arg->loc, "'%s' can't be passed by value to a call that also refers to it", arg->var->name);
+        return true;
+    default: return false;
+    }
+}
+
+/* A switch expression of an owned type outside a transfer position would act
+ * on a hidden copy of an existing object (spec 10.1). */
+static void check_switch_result(Expr *e) {
+    if (e->transfers_ownership || !e->type || !type_is_owned(e->type)) return;
+    for (int i = 0; i < e->sw->arms.len; i++) {
+        Expr *arm = e->sw->arms.data[i].expr;
+        if (arm->kind == E_SWITCH) continue; /* checked when visited */
+        if (!is_new_object(arm)) {
+            error_at(arm->loc,
+                     "this switch branch refers to an existing %s, which the switch would copy implicitly; use the "
+                     "switch where its result gets an owner (e.g. %s value = switch ...), or call .copy()",
+                     type_name(e->type), type_name(e->type));
         }
     }
 }
@@ -163,27 +193,53 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_TO_IFACE:
     case E_CAST:
     case E_UNARY: visit_expr(c, e->base, s); return;
-    case E_INDEX:
     case E_BINARY:
+        visit_expr(c, e->base, s);
+        if (e->op == TOK_ANDAND || e->op == TOK_OROR) {
+            /* the right operand runs only on some paths */
+            State right = state_copy(c, s);
+            visit_expr(c, e->index, &right);
+            state_join(c, s, &right);
+            free(right.v);
+        } else {
+            visit_expr(c, e->index, s);
+        }
+        return;
+    case E_INDEX:
         visit_expr(c, e->base, s);
         visit_expr(c, e->index, s);
         return;
     case E_CALL_METHOD:
     case E_CALL_IFACE:
-        visit_expr(c, e->base, s);
-        for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
-        check_reference_and_transfer(e);
-        return;
     case E_CALL_FUNC:
-    case E_CALL_CTOR:
-        for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
-        check_reference_and_transfer(e);
+    case E_CALL_CTOR: {
+        bool has_receiver = e->kind == E_CALL_METHOD || e->kind == E_CALL_IFACE;
+        if (has_receiver) visit_expr(c, e->base, s);
+        State after_receiver = state_copy(c, s);
+        /* Each referenced argument must still own its object once all
+         * arguments have been evaluated. */
+        State *before_arg = xcalloc((size_t)(e->args.len ? e->args.len : 1), sizeof(State));
+        for (int i = 0; i < e->args.len; i++) {
+            visit_expr(c, e->args.data[i], s);
+            before_arg[i] = state_copy(c, s);
+        }
+        if (has_receiver) check_still_owned(c, root_var(e->base), &after_receiver, s, e->loc, "this call");
+        for (int i = 0; i < e->args.len; i++) {
+            check_still_owned(c, call_reference_root(e, i), &before_arg[i], s, e->loc, "this call");
+            free(before_arg[i].v);
+        }
+        free(before_arg);
+        free(after_receiver.v);
         return;
+    }
     case E_CALL_PRINT:
     case E_ARRAY_INIT:
         for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
         return;
-    case E_SWITCH: visit_switch_expr(c, e->sw, s); return;
+    case E_SWITCH:
+        check_switch_result(e);
+        visit_switch_expr(c, e->sw, s);
+        return;
     default: return;
     }
 }
@@ -277,7 +333,10 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
             return;
         }
         visit_expr(c, st->expr, s);
+        State after_target = state_copy(c, s);
         visit_expr(c, st->value, s);
+        check_still_owned(c, root_var(st->expr), &after_target, s, st->loc, "this assignment");
+        free(after_target.v);
         return;
     }
     case S_INCDEC: visit_expr(c, st->expr, s); return;

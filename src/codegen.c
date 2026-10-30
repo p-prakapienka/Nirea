@@ -39,7 +39,7 @@ static void emit(CG *cg, const char *fmt, ...) {
 }
 
 static const char *new_tmp(CG *cg) {
-    return fmt_str("t%d", ++cg->tmp);
+    return fmt_str("nr_t%d", ++cg->tmp);
 }
 
 static const char *ctype(Type *t) {
@@ -153,8 +153,8 @@ static const char *int_literal(Type *t, uint64_t mag, bool neg) {
 /* Names                                                                   */
 
 static const char *var_ref(Var *v) {
-    if (v->kind == VAR_PARAM && v->is_ref && type_is_owned(v->type)) return fmt_str("(*l_%s)", v->name);
-    return fmt_str("l_%s", v->name);
+    if (v->kind == VAR_PARAM && v->is_ref && type_is_owned(v->type)) return fmt_str("(*nr_l_%s)", v->name);
+    return fmt_str("nr_l_%s", v->name);
 }
 
 static const char *field_name(Decl *f) {
@@ -222,7 +222,7 @@ static bool is_place(Expr *e) {
 static const char *gen_place(CG *cg, Expr *e) {
     switch (e->kind) {
     case E_VAR: return var_ref(e->var);
-    case E_THIS: return "(*self)";
+    case E_THIS: return "(*nr_self)";
     case E_FIELD: {
         const char *base = is_place(e->base) ? gen_place(cg, e->base) : gen_expr(cg, e->base);
         return fmt_str("%s.%s", base, field_name(e->decl));
@@ -245,7 +245,7 @@ static const char *gen_place(CG *cg, Expr *e) {
 /* Address of an owned value, for passing by reference. */
 static const char *gen_ref(CG *cg, Expr *e) {
     const char *p = is_place(e) ? gen_place(cg, e) : gen_expr(cg, e);
-    if (strcmp(p, "(*self)") == 0) return "self";
+    if (strcmp(p, "(*nr_self)") == 0) return "nr_self";
     return fmt_str("&%s", p);
 }
 
@@ -538,7 +538,7 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     case E_BOOL: return e->bool_value ? "true" : "false";
     case E_STRING: return string_value(e->str, e->str_len);
     case E_VAR: return var_ref(e->var);
-    case E_THIS: return "(*self)";
+    case E_THIS: return "(*nr_self)";
     case E_FIELD:
     case E_INDEX: {
         const char *p = gen_place(cg, e);
@@ -718,7 +718,7 @@ static void gen_stmt(CG *cg, Stmt *s) {
         return;
     case S_VAR: {
         Var *v = s->var;
-        const char *name = fmt_str("l_%s", v->name);
+        const char *name = fmt_str("nr_l_%s", v->name);
         if (!s->init) {
             emit(cg, "%s %s = %s;", ctype(v->type), name, zero_init(v->type));
         } else if (s->init->kind == E_ARRAY_INIT) {
@@ -775,7 +775,7 @@ static void gen_stmt(CG *cg, Stmt *s) {
         return;
     case S_RETURN:
         if (cg->fn->kind == D_CTOR) {
-            emit(cg, "return self_val;");
+            emit(cg, "return nr_self_val;");
         } else if (s->expr) {
             const char *v = gen_expr(cg, s->expr);
             emit(cg, "return %s;", v);
@@ -791,15 +791,15 @@ static void gen_stmt(CG *cg, Stmt *s) {
 
 static const char *param_decl(Var *p) {
     Type *t = p->type;
-    if (type_is_owned(t) && p->is_ref) return fmt_str("%s *l_%s", ctype(t), p->name);
-    return fmt_str("%s l_%s", ctype(t), p->name);
+    if (type_is_owned(t) && p->is_ref) return fmt_str("%s *nr_l_%s", ctype(t), p->name);
+    return fmt_str("%s nr_l_%s", ctype(t), p->name);
 }
 
 static const char *function_signature(Decl *fn) {
     StrBuf params = {0};
     int count = 0;
     if (fn->kind == D_METHOD) {
-        sb_printf(&params, "%s *self", ctype(fn->owner->type));
+        sb_printf(&params, "%s *nr_self", ctype(fn->owner->type));
         count++;
     }
     for (int i = 0; i < fn->params.len; i++) {
@@ -853,12 +853,12 @@ static void gen_function(CG *cg, Decl *fn) {
     emit(cg, "%s {", function_signature(fn));
     cg->indent++;
     if (fn->kind == D_CTOR) {
-        emit(cg, "%s self_val = {0};", ctype(fn->owner->type));
-        emit(cg, "%s *self = &self_val;", ctype(fn->owner->type));
+        emit(cg, "%s nr_self_val = {0};", ctype(fn->owner->type));
+        emit(cg, "%s *nr_self = &nr_self_val;", ctype(fn->owner->type));
     }
     for (int i = 0; i < fn->body->stmts.len; i++) gen_stmt(cg, fn->body->stmts.data[i]);
     if (fn->kind == D_CTOR) {
-        emit(cg, "return self_val;");
+        emit(cg, "return nr_self_val;");
     } else if (fn->ret_type != type_void) {
         emit(cg, "nr_unreachable();");
     }
@@ -918,7 +918,7 @@ char *codegen_program(Program *prog) {
         for (int j = 0; j < d->members.len; j++) {
             Decl *m = d->members.data[j];
             StrBuf params = {0};
-            sb_append(&params, "void *self");
+            sb_append(&params, "void *nr_self");
             for (int k = 0; k < m->params.len; k++) sb_printf(&params, ", %s", param_decl(m->params.data[k]));
             emit(&cg, "%s (*m_%s)(%s);", ctype(m->ret_type), m->name, sb_cstr(&params));
         }
@@ -988,11 +988,11 @@ char *codegen_program(Program *prog) {
                 Decl *m = map_get(&s->member_map, im->name);
                 const char *thunk = fmt_str("nr_thunk_%d_%d_%s", s->id, iface->id, im->name);
                 StrBuf params = {0}, args = {0};
-                sb_append(&params, "void *self");
-                sb_printf(&args, "(%s *)self", ctype(s->type));
+                sb_append(&params, "void *nr_self");
+                sb_printf(&args, "(%s *)nr_self", ctype(s->type));
                 for (int p = 0; p < im->params.len; p++) {
                     sb_printf(&params, ", %s", param_decl(im->params.data[p]));
-                    sb_printf(&args, ", l_%s", im->params.data[p]->name);
+                    sb_printf(&args, ", nr_l_%s", im->params.data[p]->name);
                 }
                 emit(&cg, "static %s %s(%s) {", ctype(im->ret_type), thunk, sb_cstr(&params));
                 emit(&cg, "    %s%s(%s);", im->ret_type == type_void ? "" : "return ", m->cname, sb_cstr(&args));

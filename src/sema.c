@@ -2,6 +2,7 @@
 #include "sema.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "lexer.h"
@@ -117,31 +118,13 @@ static void coerce(Expr **pe, Type *target, const char *what) {
     }
 }
 
+/* A literal, or arithmetic on literals only (computed by the parser). */
 static bool is_untyped_literal(Expr *e) {
-    switch (e->kind) {
-    case E_INT:
-    case E_FLOAT: return true;
-    case E_UNARY: return e->op == TOK_MINUS && is_untyped_literal(e->base);
-    case E_BINARY:
-        switch (e->op) {
-        case TOK_PLUS:
-        case TOK_MINUS:
-        case TOK_STAR:
-        case TOK_SLASH:
-        case TOK_PERCENT: return is_untyped_literal(e->base) && is_untyped_literal(e->index);
-        default: return false;
-        }
-    default: return false;
-    }
+    return e->untyped_literal;
 }
 
 static bool is_int_literal_expr(Expr *e) {
-    switch (e->kind) {
-    case E_INT: return true;
-    case E_UNARY: return e->op == TOK_MINUS && is_int_literal_expr(e->base);
-    case E_BINARY: return is_untyped_literal(e) && is_int_literal_expr(e->base) && is_int_literal_expr(e->index);
-    default: return false;
-    }
+    return e->int_literal;
 }
 
 static bool int_fits(uint64_t magnitude, bool negative, Type *t) {
@@ -254,6 +237,51 @@ static Decl *lookup_qualified(Ctx *ctx, const char *qualifier, const char *name,
 
 static bool const_int_value(Decl *c, int64_t *out);
 
+/* Upper bound on the size of a type in bytes, saturating at UINT64_MAX. Every
+ * field is counted as aligned to 8 bytes. */
+static uint64_t type_size_bound(Type *t) {
+    switch (t->kind) {
+    case TY_BOOL:
+    case TY_CHAR:
+    case TY_I8:
+    case TY_U8: return 1;
+    case TY_I16:
+    case TY_U16: return 2;
+    case TY_I32:
+    case TY_U32:
+    case TY_F32:
+    case TY_ENUM: return 4;
+    case TY_I64:
+    case TY_U64:
+    case TY_F64: return 8;
+    case TY_STRING:
+    case TY_INTERFACE: return 16;
+    case TY_ARRAY: {
+        uint64_t elem = type_size_bound(t->elem);
+        if (elem != 0 && (uint64_t)t->length > UINT64_MAX / elem) return UINT64_MAX;
+        return elem * (uint64_t)t->length;
+    }
+    case TY_STRUCT: {
+        uint64_t total = 8;
+        Decl *s = t->decl;
+        if (s->state == 1) return 8; /* cycle: reported separately */
+        s->state = 1;
+        for (int i = 0; i < s->members.len; i++) {
+            Decl *m = s->members.data[i];
+            if (m->kind != D_FIELD || !m->field_type) continue;
+            uint64_t f = type_size_bound(m->field_type);
+            f = f > UINT64_MAX - 7 ? UINT64_MAX : (f + 7) / 8 * 8;
+            total = f > UINT64_MAX - total ? UINT64_MAX : total + f;
+        }
+        s->state = 0;
+        return total;
+    }
+    default: return 0;
+    }
+}
+
+#define MAX_TYPE_SIZE 0x7fffffffULL
+
 static Type *resolve_type(Ctx *ctx, TypeExpr *te, bool allow_interface, const char *what) {
     if (te->is_void) {
         error_at(te->loc, "%s can't have type void", what);
@@ -307,6 +335,11 @@ static Type *resolve_type(Ctx *ctx, TypeExpr *te, bool allow_interface, const ch
             }
         }
         t = type_array(t, length);
+        if (type_size_bound(t) > MAX_TYPE_SIZE) {
+            error_at(te->loc, "type %s is too large: values are limited to %llu bytes", type_name(t),
+                     (unsigned long long)MAX_TYPE_SIZE);
+            return type_error;
+        }
     }
     return t;
 }
@@ -347,8 +380,8 @@ static void collect_decl(Program *prog, Decl *d) {
                 vec_push(prog->all_functions, m);
                 continue;
             }
-            if (m->name == name_copy) {
-                error_at(m->loc, "'copy' is built in for every struct and can't be declared");
+            if (m->name == name_copy && m->kind == D_METHOD) {
+                error_at(m->loc, "'copy' is built in for every struct and can't be declared as a method");
                 continue;
             }
             if (m->kind == D_FIELD) m->field_index = field_index++;
@@ -480,12 +513,39 @@ static void check_const(Program *prog, Decl *c) {
 /* ---------------------------------------------------------------------- */
 /* Signatures                                                              */
 
+/* Names an extern "C" function can't have: C keywords, `main`, and the
+ * prefixes the compiler uses for generated C (nr_, nr<digits>, nri<digits>). */
+static bool reserved_c_name(const char *name) {
+    static const char *const words[] = {
+        "auto",     "break",    "case",     "char",   "const",    "continue", "default",  "do",
+        "double",   "else",     "enum",     "extern", "float",    "for",      "goto",     "if",
+        "inline",   "int",      "long",     "register", "restrict", "return", "short",    "signed",
+        "sizeof",   "static",   "struct",   "switch", "typedef",  "union",    "unsigned", "void",
+        "volatile", "while",    "_Alignas", "_Alignof", "_Atomic", "_Bool",   "_Complex", "_Generic",
+        "_Imaginary", "_Noreturn", "_Static_assert", "_Thread_local", "bool", "true", "false", "main",
+    };
+    for (size_t i = 0; i < sizeof words / sizeof words[0]; i++) {
+        if (strcmp(name, words[i]) == 0) return true;
+    }
+    if (strncmp(name, "nr_", 3) == 0) return true;
+    if (strncmp(name, "nr", 2) == 0) {
+        const char *rest = name + 2;
+        if (*rest == 'i') rest++;
+        if (*rest >= '0' && *rest <= '9') return true;
+    }
+    return false;
+}
+
 static void resolve_signature(Program *prog, Decl *fn) {
     Ctx ctx = {0};
     ctx.prog = prog;
     ctx.file = fn->file;
     ctx.ns = fn->ns;
     bool is_extern = fn->kind == D_EXTERN_FUNC;
+    if (is_extern && reserved_c_name(fn->name)) {
+        error_at(fn->loc, "'%s' can't be the name of an extern \"C\" function: it is reserved in C or by the compiler",
+                 fn->name);
+    }
     if (fn->kind == D_CTOR) {
         fn->ret_type = type_void;
     } else if (fn->ret_expr->is_void) {
@@ -580,6 +640,15 @@ static bool struct_contains(Type *t, Decl *target) {
 static void check_struct_cycles(Program *prog) {
     for (int i = 0; i < prog->all_structs.len; i++) {
         Decl *s = prog->all_structs.data[i];
+        bool cyclic = false;
+        for (int j = 0; j < s->members.len; j++) {
+            Decl *m = s->members.data[j];
+            if (m->kind == D_FIELD && m->field_type && struct_contains(m->field_type, s)) cyclic = true;
+        }
+        if (!cyclic && type_size_bound(s->type) > MAX_TYPE_SIZE) {
+            error_at(s->loc, "struct '%s' is too large: values are limited to %llu bytes", s->name,
+                     (unsigned long long)MAX_TYPE_SIZE);
+        }
         for (int j = 0; j < s->members.len; j++) {
             Decl *m = s->members.data[j];
             if (m->kind == D_FIELD && m->field_type && struct_contains(m->field_type, s)) {
@@ -1268,8 +1337,12 @@ static Type *check_literal_int(Expr *e, Type *expected) {
 
 static Type *check_literal_float(Expr *e, Type *expected) {
     if (expected == type_f32) {
-        float f = (float)e->float_value;
-        if (isinf(f) && !isinf(e->float_value)) {
+        /* Round the literal's text to float directly; rounding through
+         * double first can give a different float (spec 6.3). */
+        float f = e->str ? strtof(e->str, NULL) : (float)e->float_value;
+        if (e->str && e->negative) f = -f;
+        e->float_value = f;
+        if (isinf(f)) {
             error_at(e->loc, "floating-point literal doesn't fit in float");
             return set_type(e, type_error);
         }
@@ -1417,6 +1490,7 @@ static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     case E_CALL_CTOR:
     case E_COPY: return;
     case E_SWITCH:
+        e->transfers_ownership = true; /* the result gets an owner (spec 10.1) */
         for (int i = 0; i < e->sw->arms.len; i++) {
             if (e->sw->arms.data[i].expr) check_transfer_source(ctx, e->sw->arms.data[i].expr, is_argument);
         }
@@ -1916,45 +1990,41 @@ static bool is_true_literal(Expr *e) {
     return e && e->kind == E_BOOL && e->bool_value;
 }
 
-static bool contains_break(Stmt *s) {
-    if (!s) return false;
-    switch (s->kind) {
-    case S_BREAK: return true;
-    case S_BLOCK:
-        for (int i = 0; i < s->stmts.len; i++) {
-            if (contains_break(s->stmts.data[i])) return true;
-        }
-        return false;
-    case S_IF: return contains_break(s->then_branch) || contains_break(s->else_branch);
-    case S_SWITCH:
-        for (int i = 0; i < s->sw->arms.len; i++) {
-            if (contains_break(s->sw->arms.data[i].body)) return true;
-        }
-        return false;
-    default: return false; /* breaks inside nested loops belong to those loops */
-    }
-}
+/* How control can leave a statement, other than by returning. A non-void
+ * function returns on every path iff its body can't complete normally. */
+enum { EXIT_NORMAL = 1, EXIT_BREAK = 2, EXIT_CONTINUE = 4 };
 
-static bool always_returns(Stmt *s) {
-    if (!s) return false;
+static int exits(Stmt *s) {
+    if (!s) return EXIT_NORMAL;
     switch (s->kind) {
-    case S_RETURN: return true;
-    case S_BLOCK:
-        for (int i = 0; i < s->stmts.len; i++) {
-            if (always_returns(s->stmts.data[i])) return true;
+    case S_RETURN: return 0;
+    case S_BREAK: return EXIT_BREAK;
+    case S_CONTINUE: return EXIT_CONTINUE;
+    case S_BLOCK: {
+        int current = EXIT_NORMAL;
+        for (int i = 0; i < s->stmts.len && (current & EXIT_NORMAL); i++) {
+            current = (current & ~EXIT_NORMAL) | exits(s->stmts.data[i]);
         }
-        return false;
-    case S_IF: return s->else_branch && always_returns(s->then_branch) && always_returns(s->else_branch);
-    case S_WHILE: return is_true_literal(s->expr) && !contains_break(s->body);
-    case S_FOR: return (!s->expr || is_true_literal(s->expr)) && !contains_break(s->body);
-    case S_DO: return (always_returns(s->body) && !contains_break(s->body)) || (is_true_literal(s->expr) && !contains_break(s->body));
-    case S_SWITCH:
-        if (s->sw->arms.len == 0) return false;
-        for (int i = 0; i < s->sw->arms.len; i++) {
-            if (!always_returns(s->sw->arms.data[i].body)) return false;
-        }
-        return true;
-    default: return false;
+        return current;
+    }
+    case S_IF: return exits(s->then_branch) | (s->else_branch ? exits(s->else_branch) : EXIT_NORMAL);
+    case S_SWITCH: {
+        int all = s->sw->arms.len ? 0 : EXIT_NORMAL;
+        for (int i = 0; i < s->sw->arms.len; i++) all |= exits(s->sw->arms.data[i].body);
+        return all;
+    }
+    case S_WHILE:
+    case S_FOR: {
+        bool forever = s->kind == S_FOR ? (!s->expr || is_true_literal(s->expr)) : is_true_literal(s->expr);
+        int body = exits(s->body);
+        return (!forever || (body & EXIT_BREAK)) ? EXIT_NORMAL : 0;
+    }
+    case S_DO: {
+        int body = exits(s->body);
+        bool reaches_condition = body & (EXIT_NORMAL | EXIT_CONTINUE);
+        return ((body & EXIT_BREAK) || (reaches_condition && !is_true_literal(s->expr))) ? EXIT_NORMAL : 0;
+    }
+    default: return EXIT_NORMAL;
     }
 }
 
@@ -1977,7 +2047,7 @@ static void check_function(Program *prog, Decl *fn) {
     }
     for (int i = 0; i < fn->body->stmts.len; i++) check_stmt(&ctx, fn->body->stmts.data[i]);
     pop_scope(&ctx);
-    if (fn->ret_type != type_void && !is_error(fn->ret_type) && !always_returns(fn->body)) {
+    if (fn->ret_type != type_void && !is_error(fn->ret_type) && (exits(fn->body) & EXIT_NORMAL)) {
         error_at(fn->loc, "%s '%s' doesn't return a value on every path", decl_kind_name(fn), fn->name);
     }
 }
