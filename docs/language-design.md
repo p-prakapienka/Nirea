@@ -344,14 +344,14 @@ Built-in methods:
 | `void append(String text)`           | Adds the bytes of `text` at the end                                      |
 | `void appendChar(char c)`            | Adds one byte at the end                                                 |
 | `String substring(int from, int to)` | A new `String` with the bytes from `from` up to, but not including, `to` |
-| `int indexOf(String* text)`          | The first index where `text` occurs, or `-1`; `0` for an empty `text`    |
+| `int indexOf(String text)`           | The first index where `text` occurs, or `-1`; `0` for an empty `text`    |
 | `int toInt()`                        | The text parsed as an `int`                                              |
 | `int64 toInt64()`                    | The text parsed as an `int64`                                            |
 | `float64 toFloat64()`                | The text parsed as a `float64`                                           |
 | `String copy()`                      | An independent copy (§7.2)                                               |
-| `boolean equals(String* text)`       | Whether both strings hold the same bytes (§6.9)                          |
+| `boolean equals(String text)`        | Whether both strings hold the same bytes (§6.9)                          |
 
-`append` takes its argument by value (§7.3), so a string can be appended to itself: `s.append(s)` doubles `s`. The other methods use their `String` arguments in place, like `String*` parameters.
+The `String` arguments of `append`, `indexOf` and `equals` are value parameters (§7.3), so a string can be passed to its own methods: `s.append(s)` doubles `s`, and `s.indexOf(s)` is `0`.
 
 `String.of(value)` creates a new `String` from a value of a primitive or enum type, with the same text `print` would write (§15): `String.of(42)` is `"42"`.
 
@@ -423,7 +423,7 @@ Both operands must be values of the same type, after implicit conversion for num
 
 A reference (§9) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. Readers coming from different languages would expect `==` on references to compare either addresses or values, so Nirea makes the comparison explicit: `a.equals(b)` compares the values `a` and `b` refer to, by structure, exactly as `==` compares two values. Comparing addresses is never needed, because two references in use never reach the same object (§9.3).
 
-`equals` is built in for every struct, array and `String` type. The object it is called on and its argument are both used in place, like `T*` parameters: nothing is copied and nothing changes owner. Either side can be a reference or a value, so `answer.equals("yes")` compares a `String*` parameter with a literal. Fields reached through a reference are values and can be compared with `==` directly (`a.x == b.x`). Interface values have no `equals`.
+`equals` is built in for every struct, array and `String` type. The object it is called on is used in place, like `this`, and its argument is a value parameter (§7.3), so `a.equals(a)` is allowed. Nothing changes owner. Either side can be a reference or a value, so `answer.equals("yes")` compares a `String*` parameter with a literal. Fields reached through a reference are values and can be compared with `==` directly (`a.x == b.x`). Interface values have no `equals`.
 
 ```nirea
 boolean sameContents(Engine* a, Engine* b) {
@@ -738,7 +738,7 @@ vehicle.setEngine(vehicle.engine);   // error if setEngine takes an Engine*
 addFrom(counter, counter.copy());    // ok
 ```
 
-The same holds for built-in methods with `String*` parameters, such as `text.indexOf(text)` and `text.equals(text)`: pass `text.copy()` instead. Arguments for value parameters are copies (§7.3), so they never overlap.
+Arguments for value parameters are copies (§7.3), so they never overlap. This includes the arguments of the built-in methods `equals`, `append` and `indexOf`, so `text.append(text)` is allowed.
 
 Because an object is never reachable through two references in use, replacing an object or giving it to a new owner can't leave a reference to the old object behind.
 
