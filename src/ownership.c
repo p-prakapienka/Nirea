@@ -132,7 +132,7 @@ static bool is_new_object(Expr *e) {
 /* A switch expression of an owned type outside a transfer position would act
  * on a hidden copy of an existing object (spec 10.1). */
 static void check_switch_result(Expr *e) {
-    if (e->transfers_ownership || !e->type || !type_is_owned(e->type) || e->type == type_string) return;
+    if (e->transfers_ownership || !e->type || !type_is_owned(e->type)) return;
     for (int i = 0; i < e->sw->arms.len; i++) {
         Expr *arm = e->sw->arms.data[i].expr;
         if (arm->kind == E_SWITCH) continue; /* checked when visited */

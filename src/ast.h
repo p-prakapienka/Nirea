@@ -225,7 +225,7 @@ struct Expr {
     int iface_method_index;
     Decl *iface_impl_struct; /* E_TO_IFACE: struct being converted */
     bool transfers_ownership; /* E_VAR whose object goes to a new owner */
-    bool implicit_copy;       /* existing object copied where it would otherwise transfer (spec 6.5, 7.3) */
+    bool implicit_copy;       /* existing object copied for a value parameter (spec 7.3) */
     bool literal_untyped;    /* literal whose type came from the default, not context */
     bool untyped_literal;    /* literal, or arithmetic on literals only (set by the parser) */
     bool int_literal;        /* the same, with integer literals only */

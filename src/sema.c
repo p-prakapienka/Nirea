@@ -1648,9 +1648,8 @@ static void mark_implicit_copy(Expr *e) {
 static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     (void)ctx;
     if (is_error(e->type) || !type_is_owned(e->type)) return;
-    /* Strings always copy, and value parameters receive copies of any
-     * object (spec 6.5, 7.3). */
-    if (e->type == type_string || is_argument) {
+    /* Value parameters receive copies of any object (spec 7.3). */
+    if (is_argument) {
         mark_implicit_copy(e);
         return;
     }
@@ -1945,10 +1944,6 @@ static void check_switch(Ctx *ctx, SwitchData *sw, Loc loc, bool is_expr, Expr *
         if (result && result->kind == TY_INTERFACE) {
             error_at(loc, "a switch expression can't produce an interface value");
             result = type_error;
-        }
-        if (result == type_string) {
-            /* branches that are existing strings are copied (spec 10.1) */
-            for (int i = 0; i < sw->arms.len; i++) mark_implicit_copy(sw->arms.data[i].expr);
         }
         e->type = result ? result : type_error;
     }
