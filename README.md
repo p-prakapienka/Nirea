@@ -104,7 +104,15 @@ println(engine.power);                   // error: its object was given to a new
 
 ## References
 
-A reference (`T*`) works on an existing object in place, without owning it. Besides parameters, a local variable can be a reference, and a method can return one, which lets calls be chained.
+A reference (`T*`) works on an existing object in place, without owning it. Besides parameters, a local variable can be a reference, and a function or method can return one.
+
+- `Engine* engine = vehicle.engine;` declares a reference variable. It is set once, when it is declared, and must refer to an existing object, not a temporary such as `Engine()`.
+- A function can return a reference to `this`, a reference parameter, or a part of one, but never to its own local variables.
+- A reference never owns its object. `.copy()` gives an independent object, and passing a reference to a value parameter passes a copy.
+- An object can be reached in only one way at a time. Reaching it through its owner, or through a new reference, ends the old reference.
+- A call can't reach the same object twice through its reference parameters.
+
+Methods that return `this` let calls be chained:
 
 ```nirea
 struct Engine {
@@ -138,7 +146,62 @@ void main() {
 }
 ```
 
-An object can be reached in only one way at a time. Reaching it through its owner, or through a new reference, ends the old reference:
+Chaining also works on a temporary object, which lasts until the end of the statement. A getter can return a reference into its struct:
+
+```nirea
+struct Rectangle {
+    int width;
+    int height;
+}
+
+struct Builder {
+    int width;
+    int height;
+
+    Builder* setWidth(int width) {           // returns a reference to this builder
+        this.width = width;
+        return this;
+    }
+
+    Builder* setHeight(int height) {
+        this.height = height;
+        return this;
+    }
+
+    Rectangle build() {                      // returns a new Rectangle
+        Rectangle rectangle = Rectangle();
+        rectangle.width = width;
+        rectangle.height = height;
+        return rectangle;
+    }
+}
+
+struct Garden {
+    Rectangle[3] beds;
+
+    Rectangle* bed(int index) {              // returns a reference into this garden
+        return beds[index];
+    }
+}
+
+void main() {
+    Rectangle rectangle = Builder()          // a temporary builder, destroyed after this statement
+        .setWidth(3)
+        .setHeight(4)
+        .build();
+    println(rectangle.width * rectangle.height);   // 12
+
+    Garden garden = Garden();
+    garden.bed(0).width = 5;                 // changes the first bed inside garden
+    Rectangle* second = garden.bed(1);       // a reference to the second bed
+    second.width = 2;
+    second.height = 6;
+    println(garden.beds[0].width);           // 5
+    println(garden.beds[1].width * garden.beds[1].height);   // 12
+}
+```
+
+The compiler rejects references that could outlive their object or reach it in two ways:
 
 ```nirea
 Engine* engine = vehicle.engine;
@@ -146,6 +209,14 @@ vehicle.speed = 50;                      // speed isn't part of the engine
 engine.power = 120;
 println(vehicle.engine.power);           // reaches the engine through vehicle: engine ends
 engine.power = 130;                      // error: the reference ended
+
+Engine* made = Engine();                 // error: a reference can't refer to a temporary
+addFrom(counter, counter);               // error: the call reaches counter twice
+
+Engine* make() {
+    Engine engine = Engine();
+    return engine;                       // error: engine is destroyed when make returns
+}
 ```
 
 ## Status
