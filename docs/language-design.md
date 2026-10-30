@@ -281,7 +281,7 @@ Other numeric conversions need an explicit cast, written as in Java: `(int) valu
 
 ### 6.3 Literals
 
-- Integer literals: decimal (`42`), hexadecimal (`0x2A` or `0x2a`) and binary (`0b101010`). Underscores can appear only between digits (`1_000_000`). A decimal literal other than `0` can't start with `0`. Hexadecimal and binary literals denote values, not bit patterns: `0x80000000` is 2147483648, which doesn't fit `int`.
+- Integer literals: decimal (`42`), hexadecimal (`0x2A` or `0x2a`) and binary (`0b101010`). Underscores can appear only between digits (`1_000_000`). A decimal literal other than `0` can't start with `0`. The prefixes can also be written `0X` and `0B`. Hexadecimal and binary literals denote values, not bit patterns: `0x80000000` is 2147483648, which doesn't fit `int`.
 - Floating-point literals have a fractional part, an exponent (`e` or `E`) or both: `1.5`, `2.0e-3`, `1E9`. A literal needs a digit on both sides of the decimal point.
 - Character literals: `'a'`, `'\n'`.
 - String literals: `"text"`.
@@ -649,7 +649,9 @@ switch (state) {
 }
 ```
 
-An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values. `break` and `continue` inside a switch arm apply to the enclosing loop.
+An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values.
+
+A switch expression of a struct or array type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element, `this` or alias), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls, can be used anywhere. `break` and `continue` inside a switch arm apply to the enclosing loop.
 
 ### 10.2 Exhaustiveness
 
@@ -841,7 +843,15 @@ GCC / Clang
 Native executable
 ```
 
-### 13.2 Why C as an intermediate language?
+### 13.2 Implementation limits
+
+The first compiler rejects programs beyond these limits:
+
+- Expressions nested more than 1000 levels deep, counting each operator, call, member access and parenthesis.
+- Statements and array initialisers nested more than 1000 levels deep.
+- Types whose values could be larger than 2147483647 bytes.
+
+### 13.3 Why C as an intermediate language?
 
 This approach offers several advantages:
 
@@ -889,6 +899,8 @@ Parameter types can be primitive types and `String`. Return types can be primiti
 | `float`, `float64`                  | `float`, `double`                             |
 | `String`                            | `const char *`, null-terminated               |
 | `void`                              | `void`                                        |
+
+A C function can't be named `main` or a C keyword, and names starting with `nr_`, or with `nr` or `nri` followed by a digit, are reserved for the compiler's generated code.
 
 The compiler can't check that a declaration matches the real C function. A wrong declaration has undefined behaviour, which is why the C boundary is an explicit safety boundary.
 
