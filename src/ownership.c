@@ -116,14 +116,10 @@ static Var *call_param(Expr *call, int i) {
     return fn->params.data[i];
 }
 
-/* True if argument i of a call is used in place rather than copied. */
+/* True if argument i of a call is passed to a reference parameter. The
+ * arguments of built-in methods are values (spec 6.5, 6.9). */
 static bool passed_by_reference(Expr *call, int i) {
-    if (call->kind == E_EQUALS) return true;
-    if (call->kind == E_CALL_STRING) {
-        /* built-in String methods take strings by reference, except append (spec 6.5) */
-        return call->args.data[i]->type == type_string && strcmp(call->name, "append") != 0;
-    }
-    if (call->kind == E_CALL_PRINT) return false;
+    if (call->kind == E_EQUALS || call->kind == E_CALL_STRING || call->kind == E_CALL_PRINT) return false;
     Var *p = call_param(call, i);
     return p && (p->is_ref || p->type->kind == TY_INTERFACE);
 }
