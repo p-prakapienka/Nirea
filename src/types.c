@@ -62,7 +62,7 @@ bool type_is_numeric(Type *t) {
 }
 
 bool type_is_owned(Type *t) {
-    return t->kind == TY_STRUCT || t->kind == TY_ARRAY;
+    return t->kind == TY_STRUCT || t->kind == TY_ARRAY || t->kind == TY_STRING;
 }
 
 int type_int_bits(Type *t) {

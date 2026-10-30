@@ -31,6 +31,7 @@ static const char *name_println;
 static const char *name_copy;
 static const char *name_length;
 static const char *name_main;
+static const char *name_string;
 
 static int next_decl_id;
 
@@ -576,10 +577,18 @@ static void resolve_signature(Program *prog, Decl *fn) {
                 error_at(p->loc, "interface parameters must be references: write %s* %s", type_name(p->type), p->name);
             }
         }
-        if (is_extern && !is_error(p->type) &&
-            !(type_is_numeric(p->type) || p->type == type_bool || p->type == type_char || p->type == type_string)) {
-            error_at(p->type_expr->loc, "extern \"C\" function parameters must have a primitive or String type");
-            p->type = type_error;
+        if (is_extern && !is_error(p->type)) {
+            if (p->type == type_string) {
+                if (!p->is_ref) {
+                    error_at(p->loc, "C functions receive strings by reference: write String* %s", p->name);
+                }
+            } else if (p->is_ref) {
+                error_at(p->loc, "extern \"C\" functions can only take String references (String*)");
+                p->type = type_error;
+            } else if (!(type_is_numeric(p->type) || p->type == type_bool || p->type == type_char)) {
+                error_at(p->type_expr->loc, "extern \"C\" function parameters must have a primitive type or String*");
+                p->type = type_error;
+            }
         }
     }
 }
@@ -724,6 +733,14 @@ static void check_private(Ctx *ctx, Decl *member, Loc loc) {
  * E_ALIAS) or a reference to a declaration (E_NAMESPACE_REF, E_TYPE_REF,
  * E_FUNC_REF). */
 static void resolve_name(Ctx *ctx, Expr *e) {
+    if (e->name == name_string) {
+        error_at(e->loc, "'String' is a type; the only function on it is String.of(value)");
+        e->kind = E_FUNC_REF;
+        e->decl = NULL;
+        e->name = NULL;
+        e->type = type_error;
+        return;
+    }
     ScopeEntry *se = find_scope(ctx, e->name);
     if (se) {
         if (se->var) {
@@ -1034,6 +1051,78 @@ static Type *call_decl(Ctx *ctx, Expr *e, Decl *d) {
     }
 }
 
+/* Built-in String methods (spec 6.5). Parameter kinds: 'i' int, 'c' char,
+ * 's' String reference. */
+typedef struct StringMethod {
+    const char *name;
+    const char *params;
+    Type **result;
+} StringMethod;
+
+static const StringMethod string_methods[] = {
+    {"length", "", &type_i32},       {"charAt", "i", &type_char},       {"setCharAt", "ic", &type_void},
+    {"append", "s", &type_void},     {"appendChar", "c", &type_void},   {"substring", "ii", &type_string},
+    {"indexOf", "s", &type_i32},     {"toInt", "", &type_i32},          {"toInt64", "", &type_i64},
+    {"toFloat64", "", &type_f64},
+};
+
+static void check_string_args(Ctx *ctx, Expr *e, const char *params, const char *desc) {
+    int n = (int)strlen(params);
+    if (e->args.len != n) {
+        error_at(e->loc, "%s expects %d argument%s, but %d %s given", desc, n, n == 1 ? "" : "s", e->args.len,
+                 e->args.len == 1 ? "was" : "were");
+    }
+    for (int i = 0; i < e->args.len; i++) {
+        if (i >= n) {
+            check_value(ctx, e->args.data[i], NULL);
+            continue;
+        }
+        const char *what = fmt_str("argument %d of %s", i + 1, desc);
+        Type *pt = params[i] == 'i' ? type_i32 : params[i] == 'c' ? type_char : type_string;
+        Type *at = check_value(ctx, e->args.data[i], pt);
+        if (params[i] == 's') {
+            if (!is_error(at) && at != type_string) error_at(e->args.data[i]->loc, "%s: expected String, found %s", what, type_name(at));
+        } else {
+            coerce(&e->args.data[i], pt, what);
+        }
+    }
+}
+
+static Type *check_string_method(Ctx *ctx, Expr *e, Expr *receiver, const char *name, Loc loc) {
+    for (size_t i = 0; i < sizeof string_methods / sizeof string_methods[0]; i++) {
+        if (strcmp(string_methods[i].name, name) != 0) continue;
+        e->kind = E_CALL_STRING;
+        e->base = receiver;
+        e->name = name;
+        check_string_args(ctx, e, string_methods[i].params, fmt_str("String method '%s'", name));
+        return set_type(e, *string_methods[i].result);
+    }
+    error_at(loc, "String has no method '%s'", name);
+    for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
+    return set_type(e, type_error);
+}
+
+/* String.of(value): text of a primitive or enum value (spec 6.5). */
+static Type *check_string_of(Ctx *ctx, Expr *e, const char *name, Loc loc) {
+    if (strcmp(name, "of") != 0) {
+        error_at(loc, "String has no function '%s'; did you mean String.of?", name);
+        for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
+        return set_type(e, type_error);
+    }
+    e->kind = E_CALL_STRING;
+    e->base = NULL;
+    e->name = intern_cstr("of");
+    if (e->args.len != 1) error_at(e->loc, "String.of expects one argument");
+    for (int i = 0; i < e->args.len; i++) {
+        Type *t = check_value(ctx, e->args.data[i], NULL);
+        if (!is_error(t) && !(type_is_numeric(t) || t == type_bool || t == type_char || t->kind == TY_ENUM)) {
+            error_at(e->args.data[i]->loc, "String.of needs a primitive or enum value, found %s%s", type_name(t),
+                     t == type_string ? "; use copy() to copy a String" : "");
+        }
+    }
+    return set_type(e, type_string);
+}
+
 static Type *call_method_on(Ctx *ctx, Expr *e, Expr *receiver, const char *name, Loc loc) {
     Type *rt = receiver->type;
     if (is_error(rt)) {
@@ -1046,6 +1135,7 @@ static Type *call_method_on(Ctx *ctx, Expr *e, Expr *receiver, const char *name,
         if (e->args.len) error_at(e->loc, "copy() takes no arguments");
         return set_type(e, rt);
     }
+    if (rt->kind == TY_STRING) return check_string_method(ctx, e, receiver, name, loc);
     if (rt->kind == TY_STRUCT) {
         Decl *m = map_get(&rt->decl->member_map, name);
         if (!m || m->kind != D_METHOD) {
@@ -1122,6 +1212,7 @@ static Type *check_call(Ctx *ctx, Expr *e) {
     }
     if (callee->kind == E_MEMBER) {
         Expr *base = callee->base;
+        if (base->kind == E_NAME && base->name == name_string) return check_string_of(ctx, e, callee->name, callee->loc);
         if (base->kind == E_NAME || base->kind == E_MEMBER) {
             resolve_path(ctx, base);
         } else {
@@ -1221,8 +1312,8 @@ static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
         }
         if (lt != rt) {
             error_at(e->loc, "can't compare %s with %s", type_name(lt), type_name(rt));
-        } else if (lt->kind == TY_STRUCT || lt->kind == TY_ARRAY || lt->kind == TY_INTERFACE) {
-            error_at(e->loc, "values of type %s can't be compared with '%s'", type_name(lt), opname);
+        } else if (lt->kind == TY_INTERFACE) {
+            error_at(e->loc, "interface values can't be compared with '%s'; compare fields of the objects instead", opname);
         }
         return set_type(e, type_bool);
     }
@@ -1281,7 +1372,7 @@ static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
         if (is_error(lt) || is_error(rt)) return set_type(e, type_error);
         if (!type_is_numeric(lt) || !type_is_numeric(rt)) {
             if (op == TOK_PLUS && (lt == type_string || rt == type_string)) {
-                error_at(e->loc, "strings can't be concatenated with '+' in this version of Nirea");
+                error_at(e->loc, "'+' doesn't concatenate strings; use append, e.g. text.append(other)");
             } else {
                 error_at(e->loc, "'%s' needs numeric operands, found %s and %s", opname, type_name(lt), type_name(rt));
             }
@@ -1488,7 +1579,10 @@ static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     case E_CALL_METHOD:
     case E_CALL_IFACE:
     case E_CALL_CTOR:
-    case E_COPY: return;
+    case E_CALL_STRING:
+    case E_COPY:
+    case E_STRING:
+    case E_CONST: return; /* new objects */
     case E_SWITCH:
         e->transfers_ownership = true; /* the result gets an owner (spec 10.1) */
         for (int i = 0; i < e->sw->arms.len; i++) {
@@ -1904,7 +1998,7 @@ static void check_stmt(Ctx *ctx, Stmt *s) {
             return;
         }
         if (e->kind != E_CALL_FUNC && e->kind != E_CALL_METHOD && e->kind != E_CALL_IFACE && e->kind != E_CALL_CTOR &&
-            e->kind != E_CALL_PRINT && e->kind != E_COPY && !is_error(e->type)) {
+            e->kind != E_CALL_PRINT && e->kind != E_CALL_STRING && e->kind != E_COPY && !is_error(e->type)) {
             error_at(e->loc, "this expression isn't a statement; only calls can be used as statements");
         }
         return;
@@ -2058,6 +2152,7 @@ void sema_check_program(Program *prog) {
     name_copy = intern_cstr("copy");
     name_length = intern_cstr("length");
     name_main = intern_cstr("main");
+    name_string = intern_cstr("String");
 
     collect_program(prog);
 

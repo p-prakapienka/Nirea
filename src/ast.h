@@ -46,7 +46,8 @@ struct Type {
     Type *elem;     /* array */
     int64_t length; /* array */
     const char *cname;
-    bool emitted; /* codegen bookkeeping */
+    bool emitted;   /* codegen bookkeeping */
+    int drop_state; /* codegen: 0 unknown, 1 needs no cleanup, 2 needs cleanup */
 };
 
 extern Type *type_error, *type_void, *type_bool, *type_char, *type_i8, *type_i16, *type_i32, *type_i64,
@@ -59,7 +60,7 @@ bool type_is_integer(Type *t);
 bool type_is_signed(Type *t);
 bool type_is_float(Type *t);
 bool type_is_numeric(Type *t);
-bool type_is_owned(Type *t); /* struct or array */
+bool type_is_owned(Type *t); /* struct, array or String */
 int type_int_bits(Type *t);
 const char *type_name(Type *t);
 
@@ -139,6 +140,7 @@ typedef enum ExprKind {
     E_CALL_IFACE,  /* base.method(args) through an interface reference */
     E_CALL_CTOR,   /* Struct(args) */
     E_CALL_PRINT,  /* print/println */
+    E_CALL_STRING, /* built-in String method (base = receiver) or String.of (no base) */
     E_COPY,        /* base.copy() */
     E_LENGTH,      /* base.length */
     E_CONVERT,     /* implicit conversion of operand to type */

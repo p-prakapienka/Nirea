@@ -96,6 +96,11 @@ static void check_still_owned(OCtx *c, Var *v, State *before, State *after, Loc 
 }
 
 static Var *call_reference_root(Expr *call, int i) {
+    if (call->kind == E_CALL_STRING) {
+        /* String arguments of built-in methods are references */
+        Expr *arg = call->args.data[i];
+        return arg->type == type_string ? root_var(arg) : NULL;
+    }
     Var *p = call_param(call, i);
     if (!p || !(p->is_ref || p->type->kind == TY_INTERFACE)) return NULL;
     return root_var(call->args.data[i]);
@@ -109,7 +114,10 @@ static bool is_new_object(Expr *e) {
     case E_CALL_METHOD:
     case E_CALL_IFACE:
     case E_CALL_CTOR:
-    case E_COPY: return true;
+    case E_CALL_STRING:
+    case E_COPY:
+    case E_STRING:
+    case E_CONST: return true;
     case E_SWITCH:
         for (int i = 0; i < e->sw->arms.len; i++) {
             if (!is_new_object(e->sw->arms.data[i].expr)) return false;
@@ -212,8 +220,9 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_CALL_METHOD:
     case E_CALL_IFACE:
     case E_CALL_FUNC:
-    case E_CALL_CTOR: {
-        bool has_receiver = e->kind == E_CALL_METHOD || e->kind == E_CALL_IFACE;
+    case E_CALL_CTOR:
+    case E_CALL_STRING: {
+        bool has_receiver = e->kind == E_CALL_METHOD || e->kind == E_CALL_IFACE || (e->kind == E_CALL_STRING && e->base);
         if (has_receiver) visit_expr(c, e->base, s);
         State after_receiver = state_copy(c, s);
         /* Each referenced argument must still own its object once all

@@ -14,7 +14,7 @@ namespace CMath {
 
 namespace Console {
     extern "C" {
-        int printf(String format, ...);
+        int printf(String* format, ...);
     }
 
     void show(int value) {

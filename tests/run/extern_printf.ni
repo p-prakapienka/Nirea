@@ -2,7 +2,7 @@
 // list of primitives and strings (§14).
 
 extern "C" {
-    int printf(String format, ...);
+    int printf(String* format, ...);
 }
 
 void main() {

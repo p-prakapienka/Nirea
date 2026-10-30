@@ -1,5 +1,5 @@
-// Strings aren't owned: assigning or passing a String copies it, and reading
-// a String field doesn't transfer it (§6.5, §7).
+// Strings are owned objects: assignment transfers ownership, copy() makes an
+// independent String, and a String field stays part of its owner (§6.5, §7).
 
 const String APP_NAME = "Nirea";
 
@@ -7,23 +7,28 @@ struct Named {
     String name;
 }
 
-void show(String text) {
+void show(String* text) {
     println(text);
 }
 
 void main() {
     String first = APP_NAME;
-    String second = first;
+    String second = first.copy();
+    second.append("!");
     println(first);                 // expect: Nirea
-    println(second);                // expect: Nirea
+    println(second);                // expect: Nirea!
     show(first);                    // expect: Nirea
-    second = "changed";
-    println(first);                 // expect: Nirea
-    println(second);                // expect: changed
+
+    String third = second;          // second is no longer accessible
+    println(third);                 // expect: Nirea!
+    second = "reused";
+    println(second);                // expect: reused
 
     Named named;
-    named.name = first;
-    String fromField = named.name;
-    println(fromField);             // expect: Nirea
+    named.name = first;             // the field becomes the owner
+    String fromField = named.name.copy();
+    fromField.setCharAt(0, 'J');
+    println(fromField);             // expect: Jirea
     println(named.name);            // expect: Nirea
+    println(APP_NAME);              // expect: Nirea
 }

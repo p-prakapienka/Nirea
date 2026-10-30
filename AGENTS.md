@@ -8,7 +8,7 @@ Nirea is a statically typed, memory-safe, native programming language. Its synta
 
 ## Current state
 
-The project is in **Phase 2: Initial compiler** (spec §19). The compiler implements the language as specified in version 0.4 of the spec.
+The project is in **Phase 2: Initial compiler** (spec §19). The compiler implements the language as specified in version 0.5 of the spec.
 
 ```text
 AGENTS.md                  this file
@@ -16,10 +16,10 @@ README.md                  project overview and usage
 CMakeLists.txt             build for the compiler and tests
 cmake/embed.cmake          embeds the runtime sources into the compiler
 docs/
-└── language-design.md     language design specification (v0.4, preliminary)
+└── language-design.md     language design specification (v0.5, preliminary)
 runtime/
 ├── nirea_rt.h             runtime header included by generated C
-└── nirea_rt.c             runtime: printing, runtime errors
+└── nirea_rt.c             runtime: printing, strings, runtime errors
 src/                       the compiler, in C11
 ├── main.c                 command-line interface
 ├── driver.c               file loading, imports (§12), invoking the C compiler
@@ -90,6 +90,7 @@ These rules apply to examples now and to Nirea sources later:
 - Generated C must not depend on unspecified C behaviour. Expressions are lowered to temporaries so evaluation is left to right. Checked arithmetic goes through the `nr_*` helpers in `runtime/nirea_rt.h`.
 - Generated C includes only `nirea_rt.h`, so that user `extern "C"` declarations never clash with system headers. Code that needs the C library belongs in `runtime/nirea_rt.c`.
 - Diagnostics use the format `path:line:col: error: message`. Messages say what is wrong and, where possible, how to fix it.
+- Owned objects that hold heap memory (strings, and structs and arrays containing them) are destroyed automatically by the generated code (§7.6). See the comment at the top of `src/codegen.c`. After changing code generation, run the suite with `NIREA_CFLAGS="-fsanitize=address,undefined" ctest --test-dir build -j8` to catch leaks, double frees and undefined behaviour.
 - Keep the compiler free of warnings under `-Wall -Wextra`, and keep generated C free of warnings under `-Wall`.
 
 ## Commits

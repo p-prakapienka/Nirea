@@ -1,6 +1,15 @@
 /* C code generation (spec 13). Expressions are lowered to a sequence of C
  * statements with temporaries so that evaluation is strictly left to right
- * and every checked operation runs in source order. */
+ * and every checked operation runs in source order.
+ *
+ * Owned objects that hold heap memory (strings, and structs and arrays that
+ * contain them) are destroyed automatically (spec 7.6):
+ * - locals at every exit from their block, in reverse declaration order;
+ * - temporaries that nothing took ownership of, at the end of the statement
+ *   (or of the conditional sub-expression) that created them;
+ * - the old object when a variable, field or element is assigned.
+ * A local that transfers ownership is reset to its zero value, which needs
+ * no cleanup, so the generated code never needs drop flags. */
 #include "codegen.h"
 
 #include <math.h>
@@ -13,8 +22,18 @@ typedef struct LoopLabels {
     int id;
     bool brk_used;
     bool cont_used;
+    int scope_mark; /* drop_vars length when the loop body started */
     struct LoopLabels *outer;
 } LoopLabels;
+
+typedef struct Owned {
+    const char *name; /* C lvalue */
+    Type *type;
+    bool consumed;
+} Owned;
+
+typedef VEC(Owned) OwnedVec;
+typedef VEC(int) IntVec;
 
 typedef struct CG {
     Program *prog;
@@ -24,6 +43,9 @@ typedef struct CG {
     int label;
     Decl *fn;
     LoopLabels *loop;
+    OwnedVec temps;     /* pending temporaries that may need cleanup */
+    OwnedVec drop_vars; /* locals that need cleanup, innermost last */
+    IntVec scope_marks; /* drop_vars length at the start of each block */
 } CG;
 
 /* ---------------------------------------------------------------------- */
@@ -79,8 +101,9 @@ static const char *c_string_literal(const char *s, size_t len) {
     return sb_cstr(&sb);
 }
 
-static const char *string_value(const char *s, size_t len) {
-    return fmt_str("((nr_String){%s, %zu})", c_string_literal(s, len), len);
+/* Static initialiser for a String holding literal bytes. */
+static const char *string_init(const char *s, size_t len) {
+    return fmt_str("{(char *)%s, %zu, 0}", c_string_literal(s, len), len);
 }
 
 static const char *type_suffix(Type *t) {
@@ -149,6 +172,23 @@ static const char *int_literal(Type *t, uint64_t mag, bool neg) {
     return fmt_str("((%s)UINT64_C(%llu))", ctype(t), (unsigned long long)mag);
 }
 
+/* Returns c wrapped in exactly one pair of parentheses, for if (...). */
+static const char *paren(const char *c) {
+    if (c[0] == '(') {
+        int depth = 0;
+        size_t n = strlen(c);
+        for (size_t i = 0; i < n; i++) {
+            if (c[i] == '(') depth++;
+            else if (c[i] == ')') depth--;
+            if (depth == 0) {
+                if (i == n - 1) return c;
+                break;
+            }
+        }
+    }
+    return fmt_str("(%s)", c);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Names                                                                   */
 
@@ -198,18 +238,114 @@ static const char *vtable_name(Decl *s, Decl *iface) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Cleanup, copying and equality of owned types                            */
+
+/* True if values of t own heap memory, directly or through fields. */
+static bool needs_drop(Type *t) {
+    if (t->kind == TY_STRING) return true;
+    if (t->kind == TY_ARRAY) return needs_drop(t->elem);
+    if (t->kind != TY_STRUCT) return false;
+    if (t->drop_state) return t->drop_state == 2;
+    t->drop_state = 1;
+    Decl *s = t->decl;
+    for (int i = 0; i < s->members.len; i++) {
+        Decl *m = s->members.data[i];
+        if (m->kind == D_FIELD && needs_drop(m->field_type)) t->drop_state = 2;
+    }
+    return t->drop_state == 2;
+}
+
+/* C statement that destroys the object at lvalue. */
+static const char *drop_stmt(Type *t, const char *lvalue) {
+    if (t->kind == TY_STRING) return fmt_str("nr_str_free(&%s);", lvalue);
+    return fmt_str("nr_drop_%s(&%s);", ctype(t), lvalue);
+}
+
+/* C expression for an independent copy of the object at lvalue (spec 7.2). */
+static const char *copy_expr(Type *t, const char *lvalue) {
+    if (!needs_drop(t)) return lvalue;
+    if (t->kind == TY_STRING) return fmt_str("nr_str_copy(&%s)", lvalue);
+    return fmt_str("nr_copy_%s(&%s)", ctype(t), lvalue);
+}
+
+/* C expression comparing the values at two lvalues (spec 6.9). */
+static const char *eq_expr(Type *t, const char *a, const char *b) {
+    switch (t->kind) {
+    case TY_STRING: return fmt_str("nr_str_eq(&%s, &%s)", a, b);
+    case TY_STRUCT:
+    case TY_ARRAY: return fmt_str("nr_eq_%s(&%s, &%s)", ctype(t), a, b);
+    default: return fmt_str("(%s == %s)", a, b);
+    }
+}
+
+/* Registers a temporary whose object nothing owns yet. */
+static void add_temp(CG *cg, const char *name, Type *t) {
+    if (!type_is_owned(t) || !needs_drop(t)) return;
+    Owned o = {name, t, false};
+    vec_push(cg->temps, o);
+}
+
+/* Marks a temporary as taken over by a new owner. */
+static void consume(CG *cg, const char *name) {
+    for (int i = cg->temps.len - 1; i >= 0; i--) {
+        if (!cg->temps.data[i].consumed && strcmp(cg->temps.data[i].name, name) == 0) {
+            cg->temps.data[i].consumed = true;
+            return;
+        }
+    }
+}
+
+static bool temps_pending(CG *cg, int mark) {
+    for (int i = mark; i < cg->temps.len; i++) {
+        if (!cg->temps.data[i].consumed) return true;
+    }
+    return false;
+}
+
+/* Destroys the temporaries created since mark that nothing took over. */
+static void drop_temps(CG *cg, int mark) {
+    for (int i = cg->temps.len - 1; i >= mark; i--) {
+        Owned *o = &cg->temps.data[i];
+        if (!o->consumed) emit(cg, "%s", drop_stmt(o->type, o->name));
+    }
+    cg->temps.len = mark;
+}
+
+static void push_scope(CG *cg) {
+    vec_push(cg->scope_marks, cg->drop_vars.len);
+}
+
+static void add_drop_var(CG *cg, const char *name, Type *t) {
+    if (!needs_drop(t)) return;
+    Owned o = {name, t, false};
+    vec_push(cg->drop_vars, o);
+}
+
+/* Destroys locals from the innermost one down to index from. */
+static void drop_vars_from(CG *cg, int from) {
+    for (int i = cg->drop_vars.len - 1; i >= from; i--) {
+        emit(cg, "%s", drop_stmt(cg->drop_vars.data[i].type, cg->drop_vars.data[i].name));
+    }
+}
+
+static void pop_scope(CG *cg) {
+    int mark = cg->scope_marks.data[--cg->scope_marks.len];
+    drop_vars_from(cg, mark);
+    cg->drop_vars.len = mark;
+}
+
+/* ---------------------------------------------------------------------- */
 /* Expressions                                                             */
 
 static const char *gen_expr(CG *cg, Expr *e);
 static const char *gen_place(CG *cg, Expr *e);
 static void gen_stmt(CG *cg, Stmt *s);
-static const char *paren(const char *c);
 
 static bool is_place(Expr *e) {
     switch (e->kind) {
     case E_VAR:
     case E_THIS:
-    case E_INDEX: return true;
+    case E_INDEX:
     case E_FIELD: return true;
     case E_ALIAS: return is_place(e->alias->expr);
     default: return false;
@@ -242,11 +378,24 @@ static const char *gen_place(CG *cg, Expr *e) {
     }
 }
 
+/* An lvalue for an owned value used in place: the place itself, or the
+ * temporary holding a new object. */
+static const char *gen_lvalue(CG *cg, Expr *e) {
+    return is_place(e) ? gen_place(cg, e) : gen_expr(cg, e);
+}
+
 /* Address of an owned value, for passing by reference. */
 static const char *gen_ref(CG *cg, Expr *e) {
-    const char *p = is_place(e) ? gen_place(cg, e) : gen_expr(cg, e);
+    const char *p = gen_lvalue(cg, e);
     if (strcmp(p, "(*nr_self)") == 0) return "nr_self";
     return fmt_str("&%s", p);
+}
+
+/* An owned value given to a new owner: the caller must consume() it. */
+static const char *gen_owned_value(CG *cg, Expr *e) {
+    const char *v = gen_expr(cg, e);
+    consume(cg, v);
+    return v;
 }
 
 static const char *gen_iface_arg(CG *cg, Expr *e) {
@@ -260,25 +409,97 @@ static const char *gen_iface_arg(CG *cg, Expr *e) {
 static const char *gen_arg(CG *cg, Expr *arg, Var *param, bool is_extern) {
     Type *param_type = param ? param->type : NULL;
     if (param_type && param_type->kind == TY_INTERFACE) return gen_iface_arg(cg, arg);
-    if (param_type && type_is_owned(param_type) && param->is_ref) return gen_ref(cg, arg);
-    if (is_extern && arg->kind == E_STRING) return c_string_literal(arg->str, arg->str_len);
-    const char *v = gen_expr(cg, arg);
-    if (is_extern) {
-        Type *t = arg->type;
-        if (t == type_string) return fmt_str("nr_cstr(%s)", v);
-        if (t == type_char) return fmt_str("(char)%s", v);
+    if (is_extern && arg->type == type_string) {
+        /* C receives the bytes of the string (spec 14) */
+        if (arg->kind == E_STRING) return c_string_literal(arg->str, arg->str_len);
+        return fmt_str("nr_cstr(%s)", gen_ref(cg, arg));
     }
+    if (param_type && type_is_owned(param_type)) {
+        if (param->is_ref) return gen_ref(cg, arg);
+        return gen_owned_value(cg, arg); /* value parameter: the callee owns it */
+    }
+    const char *v = gen_expr(cg, arg);
+    if (is_extern && arg->type == type_char) return fmt_str("(char)%s", v);
     return v;
 }
 
+/* Emits a call. Owned results become temporaries even when unused, so they
+ * are destroyed if nothing takes them over. */
 static const char *finish_call(CG *cg, Type *ret, const char *call, bool want_value) {
-    if (ret == type_void || !want_value) {
+    if (ret == type_void || (!want_value && !(type_is_owned(ret) && needs_drop(ret)))) {
         emit(cg, "%s;", call);
         return "";
     }
     const char *t = new_tmp(cg);
     emit(cg, "%s %s = %s;", ctype(ret), t, call);
+    add_temp(cg, t, ret);
     return t;
+}
+
+static const char *gen_print(CG *cg, Expr *e) {
+    if (e->args.len == 1) {
+        Expr *arg = e->args.data[0];
+        Type *t = arg->type;
+        if (t == type_string) {
+            emit(cg, "nr_print_str(%s);", gen_ref(cg, arg));
+        } else {
+            const char *v = gen_expr(cg, arg);
+            if (type_is_integer(t)) {
+                if (type_is_signed(t)) emit(cg, "nr_print_i64((int64_t)%s);", v);
+                else emit(cg, "nr_print_u64((uint64_t)%s);", v);
+            } else if (t == type_f32) {
+                emit(cg, "nr_print_f32(%s);", v);
+            } else if (t == type_f64) {
+                emit(cg, "nr_print_f64(%s);", v);
+            } else if (t == type_bool) {
+                emit(cg, "nr_print_bool(%s);", v);
+            } else if (t == type_char) {
+                emit(cg, "nr_print_char(%s);", v);
+            } else if (t->kind == TY_ENUM) {
+                emit(cg, "nr_print_str(&%s_names[%s]);", t->decl->cname, v);
+            }
+        }
+    }
+    if (strcmp(e->name, "println") == 0) emit(cg, "nr_print_newline();");
+    return "";
+}
+
+/* Built-in String methods and String.of (spec 6.5). */
+static const char *gen_string_call(CG *cg, Expr *e, bool want_value) {
+    const char *name = e->name;
+    if (!e->base) { /* String.of */
+        Expr *arg = e->args.data[0];
+        Type *t = arg->type;
+        const char *v = gen_expr(cg, arg);
+        const char *call;
+        if (type_is_integer(t)) call = fmt_str(type_is_signed(t) ? "nr_str_of_i64((int64_t)%s)" : "nr_str_of_u64((uint64_t)%s)", v);
+        else if (t == type_f32) call = fmt_str("nr_str_of_f32(%s)", v);
+        else if (t == type_f64) call = fmt_str("nr_str_of_f64(%s)", v);
+        else if (t == type_bool) call = fmt_str("nr_str_of_bool(%s)", v);
+        else if (t == type_char) call = fmt_str("nr_str_of_char(%s)", v);
+        else call = fmt_str("%s_names[%s]", t->decl->cname, v); /* enum: static name */
+        return finish_call(cg, type_string, call, want_value);
+    }
+    const char *recv = gen_ref(cg, e->base);
+    StrBuf args = {0};
+    for (int i = 0; i < e->args.len; i++) {
+        Expr *arg = e->args.data[i];
+        if (arg->type == type_string) sb_printf(&args, ", %s", gen_ref(cg, arg));
+        else if (type_is_integer(arg->type)) sb_printf(&args, ", (int64_t)%s", gen_expr(cg, arg));
+        else sb_printf(&args, ", %s", gen_expr(cg, arg));
+    }
+    const char *loc = loc_str(e->loc);
+    const char *a = sb_cstr(&args);
+    if (strcmp(name, "length") == 0) return finish_call(cg, type_i32, fmt_str("nr_str_length(%s, %s)", recv, loc), want_value);
+    if (strcmp(name, "charAt") == 0) return finish_call(cg, type_char, fmt_str("nr_str_char_at(%s%s, %s)", recv, a, loc), want_value);
+    if (strcmp(name, "setCharAt") == 0) return finish_call(cg, type_void, fmt_str("nr_str_set_char_at(%s%s, %s)", recv, a, loc), want_value);
+    if (strcmp(name, "append") == 0) return finish_call(cg, type_void, fmt_str("nr_str_append(%s%s)", recv, a), want_value);
+    if (strcmp(name, "appendChar") == 0) return finish_call(cg, type_void, fmt_str("nr_str_append_char(%s%s)", recv, a), want_value);
+    if (strcmp(name, "substring") == 0) return finish_call(cg, type_string, fmt_str("nr_str_substring(%s%s, %s)", recv, a, loc), want_value);
+    if (strcmp(name, "indexOf") == 0) return finish_call(cg, type_i32, fmt_str("nr_str_index_of(%s%s)", recv, a), want_value);
+    if (strcmp(name, "toInt") == 0) return finish_call(cg, type_i32, fmt_str("nr_str_to_i32(%s, %s)", recv, loc), want_value);
+    if (strcmp(name, "toInt64") == 0) return finish_call(cg, type_i64, fmt_str("nr_str_to_i64(%s, %s)", recv, loc), want_value);
+    return finish_call(cg, type_f64, fmt_str("nr_str_to_f64(%s, %s)", recv, loc), want_value);
 }
 
 static const char *gen_call(CG *cg, Expr *e, bool want_value) {
@@ -316,6 +537,7 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
         if (!s->ctor) {
             const char *t = new_tmp(cg);
             emit(cg, "%s %s = %s;", ctype(s->type), t, zero_init(s->type));
+            add_temp(cg, t, s->type);
             return t;
         }
         for (int i = 0; i < e->args.len; i++) {
@@ -323,44 +545,20 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
         }
         return finish_call(cg, s->type, fmt_str("%s(%s)", s->ctor->cname, args.len ? sb_cstr(&args) : ""), true);
     }
-    case E_CALL_PRINT: {
-        if (e->args.len == 1) {
-            Expr *arg = e->args.data[0];
-            Type *t = arg->type;
-            const char *v = gen_expr(cg, arg);
-            if (type_is_integer(t)) {
-                if (type_is_signed(t)) emit(cg, "nr_print_i64((int64_t)%s);", v);
-                else emit(cg, "nr_print_u64((uint64_t)%s);", v);
-            } else if (t == type_f32) {
-                emit(cg, "nr_print_f32(%s);", v);
-            } else if (t == type_f64) {
-                emit(cg, "nr_print_f64(%s);", v);
-            } else if (t == type_bool) {
-                emit(cg, "nr_print_bool(%s);", v);
-            } else if (t == type_char) {
-                emit(cg, "nr_print_char(%s);", v);
-            } else if (t == type_string) {
-                emit(cg, "nr_print_str(%s);", v);
-            } else if (t->kind == TY_ENUM) {
-                emit(cg, "nr_print_str(%s_names[%s]);", t->decl->cname, v);
-            }
-        }
-        if (strcmp(e->name, "println") == 0) emit(cg, "nr_print_newline();");
-        return "";
-    }
+    case E_CALL_PRINT: return gen_print(cg, e);
+    case E_CALL_STRING: return gen_string_call(cg, e, want_value);
     default: return "";
     }
 }
 
-static const char *gen_switch_cond(CG *cg, SwitchData *sw, SwitchArm *arm, const char *subject) {
-    (void)cg;
+static const char *gen_switch_cond(SwitchData *sw, SwitchArm *arm, const char *subject) {
     StrBuf sb = {0};
     for (int j = 0; j < arm->values.len; j++) {
         CaseValue *cv = &arm->values.data[j];
         if (j) sb_append(&sb, " || ");
         switch (sw->kind) {
         case SW_STRING:
-            sb_printf(&sb, "nr_str_eq(%s, %s)", subject, string_value(cv->svalue, cv->slen));
+            sb_printf(&sb, "nr_str_eq(%s, &(nr_String)%s)", subject, string_init(cv->svalue, cv->slen));
             break;
         case SW_ENUM: sb_printf(&sb, "%s == %lld", subject, (long long)cv->ivalue); break;
         case SW_BOOL: sb_printf(&sb, "%s == %s", subject, cv->uvalue ? "true" : "false"); break;
@@ -373,50 +571,37 @@ static const char *gen_switch_cond(CG *cg, SwitchData *sw, SwitchArm *arm, const
     return sb_cstr(&sb);
 }
 
-/* Emits the if-chain for a switch. For each arm, arm_fn emits its body. */
-typedef void (*ArmFn)(CG *cg, SwitchArm *arm, void *data);
-
-static void gen_switch_chain(CG *cg, SwitchData *sw, ArmFn arm_fn, void *data) {
-    const char *subj_val = gen_expr(cg, sw->subject);
-    const char *subj = new_tmp(cg);
-    emit(cg, "%s %s = %s;", ctype(sw->subject->type), subj, subj_val);
-    SwitchArm *default_arm = NULL;
+/* Evaluates the subject of a switch and selects an arm, then destroys the
+ * temporaries of the subject. Returns the arms in dispatch order and the C
+ * variable holding the selected arm's index. */
+static const char *gen_switch_select(CG *cg, SwitchData *sw, SwitchArm ***arms_out, int *count_out) {
+    int mark = cg->temps.len;
+    const char *subject;
+    if (sw->kind == SW_STRING) {
+        subject = gen_ref(cg, sw->subject);
+    } else {
+        const char *v = gen_expr(cg, sw->subject);
+        subject = new_tmp(cg);
+        emit(cg, "%s %s = %s;", ctype(sw->subject->type), subject, v);
+    }
     VEC(SwitchArm *) arms = {0};
+    SwitchArm *default_arm = NULL;
     for (int i = 0; i < sw->arms.len; i++) {
         if (sw->arms.data[i].is_default) default_arm = &sw->arms.data[i];
         else vec_push(arms, &sw->arms.data[i]);
     }
-    int n = arms.len;
-    for (int i = 0; i < n; i++) {
-        bool last_is_else = !default_arm && i == n - 1;
-        if (last_is_else) {
-            emit(cg, i == 0 ? "{" : "else {");
-        } else {
-            emit(cg, "%sif %s {", i == 0 ? "" : "else ", paren(gen_switch_cond(cg, sw, arms.data[i], subj)));
-        }
-        cg->indent++;
-        arm_fn(cg, arms.data[i], data);
-        cg->indent--;
-        emit(cg, "}");
+    if (default_arm) vec_push(arms, default_arm);
+    const char *selected = new_tmp(cg);
+    emit(cg, "int %s = %d;", selected, arms.len - 1);
+    /* the last arm is the default, or for an exhaustive switch the only
+     * remaining case, so it needs no test */
+    for (int i = 0; i < arms.len - 1; i++) {
+        emit(cg, "%sif %s %s = %d;", i ? "else " : "", paren(gen_switch_cond(sw, arms.data[i], subject)), selected, i);
     }
-    if (default_arm) {
-        emit(cg, n == 0 ? "{" : "else {");
-        cg->indent++;
-        arm_fn(cg, default_arm, data);
-        cg->indent--;
-        emit(cg, "}");
-    }
-}
-
-static void switch_expr_arm(CG *cg, SwitchArm *arm, void *data) {
-    const char *result = data;
-    const char *v = gen_expr(cg, arm->expr);
-    emit(cg, "%s = %s;", result, v);
-}
-
-static void switch_stmt_arm(CG *cg, SwitchArm *arm, void *data) {
-    (void)data;
-    gen_stmt(cg, arm->body);
+    drop_temps(cg, mark);
+    *arms_out = arms.data;
+    *count_out = arms.len;
+    return selected;
 }
 
 static const char *checked_op_name(int op) {
@@ -498,20 +683,25 @@ static const char *gen_binary(CG *cg, Expr *e) {
         emit(cg, "bool %s = %s;", t, l);
         emit(cg, "if (%s%s) {", op == TOK_ANDAND ? "" : "!", t);
         cg->indent++;
+        int mark = cg->temps.len;
         const char *r = gen_expr(cg, e->index);
         emit(cg, "%s = %s;", t, r);
+        drop_temps(cg, mark);
         cg->indent--;
         emit(cg, "}");
         return t;
     }
+    Type *lt = e->base->type;
+    if ((op == TOK_EQ || op == TOK_NE) && type_is_owned(lt)) {
+        const char *l = gen_lvalue(cg, e->base);
+        const char *r = gen_lvalue(cg, e->index);
+        return fmt_str("(%s%s)", op == TOK_NE ? "!" : "", eq_expr(lt, l, r));
+    }
     const char *l = gen_expr(cg, e->base);
     const char *r = gen_expr(cg, e->index);
-    Type *lt = e->base->type;
     switch (op) {
-    case TOK_EQ:
-    case TOK_NE:
-        if (lt == type_string) return fmt_str("(%snr_str_eq(%s, %s))", op == TOK_NE ? "!" : "", l, r);
-        return fmt_str("(%s %s %s)", l, op == TOK_EQ ? "==" : "!=", r);
+    case TOK_EQ: return fmt_str("(%s == %s)", l, r);
+    case TOK_NE: return fmt_str("(%s != %s)", l, r);
     case TOK_LT: return fmt_str("(%s < %s)", l, r);
     case TOK_LE: return fmt_str("(%s <= %s)", l, r);
     case TOK_GT: return fmt_str("(%s > %s)", l, r);
@@ -530,14 +720,52 @@ static const char *gen_conversion(CG *cg, Expr *e, Type *from, Type *to, const c
     return fmt_str("((%s)%s)", ctype(to), v);
 }
 
+static const char *gen_switch_expr(CG *cg, Expr *e) {
+    SwitchArm **arms;
+    int count;
+    const char *selected = gen_switch_select(cg, e->sw, &arms, &count);
+    const char *result = new_tmp(cg);
+    emit(cg, "%s %s = %s;", ctype(e->type), result, zero_init(e->type));
+    for (int i = 0; i < count; i++) {
+        emit(cg, i == 0 ? "if (%s == %d) {" : "else if (%s == %d) {", selected, i);
+        cg->indent++;
+        int mark = cg->temps.len;
+        const char *v = type_is_owned(e->type) ? gen_owned_value(cg, arms[i]->expr) : gen_expr(cg, arms[i]->expr);
+        emit(cg, "%s = %s;", result, v);
+        drop_temps(cg, mark);
+        cg->indent--;
+        emit(cg, "}");
+    }
+    add_temp(cg, result, e->type);
+    return result;
+}
+
 static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     switch (e->kind) {
     case E_INT: return int_literal(e->type, e->int_value, e->negative);
     case E_FLOAT: return float_literal(e->float_value, e->type == type_f32);
     case E_CHAR: return fmt_str("((uint8_t)%llu)", (unsigned long long)e->int_value);
     case E_BOOL: return e->bool_value ? "true" : "false";
-    case E_STRING: return string_value(e->str, e->str_len);
-    case E_VAR: return var_ref(e->var);
+    case E_STRING: {
+        /* each evaluation is a new String object (spec 6.5) */
+        const char *t = new_tmp(cg);
+        emit(cg, "nr_String %s = nr_str_lit(%s, %zu);", t, c_string_literal(e->str, e->str_len), e->str_len);
+        add_temp(cg, t, type_string);
+        return t;
+    }
+    case E_VAR: {
+        const char *v = var_ref(e->var);
+        if (e->transfers_ownership && needs_drop(e->type)) {
+            /* The new owner takes the object; the variable is left empty so
+             * that its own cleanup does nothing (spec 7.1). */
+            const char *t = new_tmp(cg);
+            emit(cg, "%s %s = %s;", ctype(e->type), t, v);
+            emit(cg, "%s = %s;", v, zero_value(e->type));
+            add_temp(cg, t, e->type);
+            return t;
+        }
+        return v;
+    }
     case E_THIS: return "(*nr_self)";
     case E_FIELD:
     case E_INDEX: {
@@ -549,25 +777,33 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     }
     case E_ALIAS: return gen_expr_impl(cg, e->alias->expr, want_value);
     case E_ENUM_VALUE: return fmt_str("%d", e->enum_index);
-    case E_CONST: return e->decl->cname;
+    case E_CONST: {
+        if (e->type != type_string) return e->decl->cname;
+        const char *t = new_tmp(cg);
+        emit(cg, "nr_String %s = %s;", t, e->decl->cname);
+        add_temp(cg, t, type_string);
+        return t;
+    }
     case E_LENGTH: {
         /* The length is constant, but the base is still evaluated (and its
          * indexes bounds-checked). */
-        const char *base = is_place(e->base) ? gen_place(cg, e->base) : gen_expr(cg, e->base);
+        const char *base = gen_lvalue(cg, e->base);
         if (strchr(base, '[') || strchr(base, '(')) emit(cg, "(void)%s;", base);
         return fmt_str("%lld", (long long)e->base->type->length);
     }
     case E_COPY: {
-        const char *p = is_place(e->base) ? gen_place(cg, e->base) : gen_expr(cg, e->base);
+        const char *p = gen_lvalue(cg, e->base);
         const char *t = new_tmp(cg);
-        emit(cg, "%s %s = %s;", ctype(e->type), t, p);
+        emit(cg, "%s %s = %s;", ctype(e->type), t, copy_expr(e->type, p));
+        add_temp(cg, t, e->type);
         return t;
     }
     case E_CALL_FUNC:
     case E_CALL_METHOD:
     case E_CALL_IFACE:
     case E_CALL_CTOR:
-    case E_CALL_PRINT: return gen_call(cg, e, want_value);
+    case E_CALL_PRINT:
+    case E_CALL_STRING: return gen_call(cg, e, want_value);
     case E_UNARY: {
         const char *v = gen_expr(cg, e->base);
         switch (e->op) {
@@ -588,12 +824,7 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
         const char *v = gen_expr(cg, e->base);
         return gen_conversion(cg, e, e->base->type, e->type, v);
     }
-    case E_SWITCH: {
-        const char *result = new_tmp(cg);
-        emit(cg, "%s %s = %s;", ctype(e->type), result, zero_init(e->type));
-        gen_switch_chain(cg, e->sw, switch_expr_arm, (void *)result);
-        return result;
-    }
+    case E_SWITCH: return gen_switch_expr(cg, e);
     case E_TO_IFACE: return gen_iface_arg(cg, e);
     default: return "0";
     }
@@ -601,6 +832,17 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
 
 static const char *gen_expr(CG *cg, Expr *e) {
     return gen_expr_impl(cg, e, true);
+}
+
+/* A condition's value, safe to use after the temporaries since mark are
+ * destroyed. */
+static const char *gen_condition(CG *cg, Expr *e, int mark) {
+    const char *c = gen_expr(cg, e);
+    if (!temps_pending(cg, mark)) return c;
+    const char *t = new_tmp(cg);
+    emit(cg, "bool %s = %s;", t, c);
+    drop_temps(cg, mark);
+    return t;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -613,70 +855,50 @@ static void gen_array_init(CG *cg, const char *place, Expr *init) {
         if (el->kind == E_ARRAY_INIT) {
             gen_array_init(cg, elem_place, el);
         } else {
-            const char *v = gen_expr(cg, el);
+            const char *v = type_is_owned(el->type) ? gen_owned_value(cg, el) : gen_expr(cg, el);
             emit(cg, "%s = %s;", elem_place, v);
         }
     }
 }
 
-static void gen_block_body(CG *cg, Stmt *s) {
+/* Generates a statement as the body of a C block with its own scope. */
+static void gen_scoped(CG *cg, Stmt *s) {
+    cg->indent++;
+    push_scope(cg);
     if (s->kind == S_BLOCK) {
         for (int i = 0; i < s->stmts.len; i++) gen_stmt(cg, s->stmts.data[i]);
     } else {
         gen_stmt(cg, s);
     }
-}
-
-static void gen_braced(CG *cg, Stmt *s) {
-    cg->indent++;
-    gen_block_body(cg, s);
+    pop_scope(cg);
     cg->indent--;
 }
 
-/* Returns c wrapped in exactly one pair of parentheses, for if (...). */
-static const char *paren(const char *c) {
-    if (c[0] == '(') {
-        int depth = 0;
-        size_t n = strlen(c);
-        for (size_t i = 0; i < n; i++) {
-            if (c[i] == '(') depth++;
-            else if (c[i] == ')') depth--;
-            if (depth == 0) {
-                if (i == n - 1) return c;
-                break;
-            }
-        }
-    }
-    return fmt_str("(%s)", c);
-}
-
-static const char *gen_condition(CG *cg, Expr *e) {
-    return gen_expr(cg, e);
-}
-
 static void gen_loop(CG *cg, Stmt *s) {
-    LoopLabels labels = {++cg->label, false, false, cg->loop};
-    cg->loop = &labels;
+    LoopLabels labels = {++cg->label, false, false, 0, cg->loop};
     if (s->kind == S_FOR) {
         emit(cg, "{");
         cg->indent++;
+        push_scope(cg);
         if (s->for_init) gen_stmt(cg, s->for_init);
     }
+    labels.scope_mark = cg->drop_vars.len;
+    cg->loop = &labels;
     emit(cg, "for (;;) {");
     cg->indent++;
     if (s->kind != S_DO && s->expr) {
-        const char *c = gen_condition(cg, s->expr);
+        const char *c = gen_condition(cg, s->expr, cg->temps.len);
         emit(cg, "if (!%s) break;", c);
     }
     emit(cg, "{");
-    gen_braced(cg, s->body);
+    gen_scoped(cg, s->body);
     emit(cg, "}");
     StrBuf *saved = cg->out;
     StrBuf tail = {0};
     cg->out = &tail;
     if (s->kind == S_FOR && s->for_update) gen_stmt(cg, s->for_update);
     if (s->kind == S_DO) {
-        const char *c = gen_condition(cg, s->expr);
+        const char *c = gen_condition(cg, s->expr, cg->temps.len);
         emit(cg, "if (!%s) break;", c);
     }
     cg->out = saved;
@@ -685,22 +907,24 @@ static void gen_loop(CG *cg, Stmt *s) {
     cg->indent--;
     emit(cg, "}");
     if (labels.brk_used) emit(cg, "nr_brk%d:;", labels.id);
+    cg->loop = labels.outer;
     if (s->kind == S_FOR) {
+        pop_scope(cg);
         cg->indent--;
         emit(cg, "}");
     }
-    cg->loop = labels.outer;
 }
 
 static void gen_assign(CG *cg, Stmt *s) {
     Expr *target = s->expr;
+    Type *t = target->type;
     if (s->op == TOK_ASSIGN) {
         const char *place = gen_place(cg, target);
-        const char *v = gen_expr(cg, s->value);
+        const char *v = type_is_owned(t) ? gen_owned_value(cg, s->value) : gen_expr(cg, s->value);
+        if (type_is_owned(t) && needs_drop(t)) emit(cg, "%s", drop_stmt(t, place)); /* replaced object (spec 7.5) */
         emit(cg, "%s = %s;", place, v);
         return;
     }
-    Type *t = target->type;
     const char *place = gen_place(cg, target);
     const char *old = new_tmp(cg);
     emit(cg, "%s %s = %s;", ctype(t), old, place);
@@ -709,11 +933,23 @@ static void gen_assign(CG *cg, Stmt *s) {
     emit(cg, "%s = %s;", place, result);
 }
 
+static void switch_stmt_body(CG *cg, SwitchData *sw) {
+    SwitchArm **arms;
+    int count;
+    const char *selected = gen_switch_select(cg, sw, &arms, &count);
+    for (int i = 0; i < count; i++) {
+        emit(cg, i == 0 ? "if (%s == %d) {" : "else if (%s == %d) {", selected, i);
+        gen_scoped(cg, arms[i]->body);
+        emit(cg, "}");
+    }
+}
+
 static void gen_stmt(CG *cg, Stmt *s) {
+    int mark = cg->temps.len;
     switch (s->kind) {
     case S_BLOCK:
         emit(cg, "{");
-        gen_braced(cg, s);
+        gen_scoped(cg, s);
         emit(cg, "}");
         return;
     case S_VAR: {
@@ -725,14 +961,22 @@ static void gen_stmt(CG *cg, Stmt *s) {
             emit(cg, "%s %s = {0};", ctype(v->type), name);
             gen_array_init(cg, name, s->init);
         } else {
-            const char *val = gen_expr(cg, s->init);
+            const char *val = type_is_owned(v->type) ? gen_owned_value(cg, s->init) : gen_expr(cg, s->init);
             emit(cg, "%s %s = %s;", ctype(v->type), name, val);
         }
+        drop_temps(cg, mark);
+        add_drop_var(cg, name, v->type);
         return;
     }
     case S_ALIAS: return;
-    case S_EXPR: gen_expr_impl(cg, s->expr, false); return;
-    case S_ASSIGN: gen_assign(cg, s); return;
+    case S_EXPR:
+        gen_expr_impl(cg, s->expr, false);
+        drop_temps(cg, mark);
+        return;
+    case S_ASSIGN:
+        gen_assign(cg, s);
+        drop_temps(cg, mark);
+        return;
     case S_INCDEC: {
         Type *t = s->expr->type;
         const char *place = gen_place(cg, s->expr);
@@ -741,15 +985,16 @@ static void gen_stmt(CG *cg, Stmt *s) {
         emit(cg, "%s %s = %s;", ctype(t), old, place);
         const char *r = apply_arith(cg, s->op, t, old, one, t, s->loc);
         emit(cg, "%s = %s;", place, r);
+        drop_temps(cg, mark);
         return;
     }
     case S_IF: {
-        const char *c = gen_condition(cg, s->expr);
+        const char *c = gen_condition(cg, s->expr, mark);
         emit(cg, "if %s {", paren(c));
-        gen_braced(cg, s->then_branch);
+        gen_scoped(cg, s->then_branch);
         if (s->else_branch) {
             emit(cg, "} else {");
-            gen_braced(cg, s->else_branch);
+            gen_scoped(cg, s->else_branch);
         }
         emit(cg, "}");
         return;
@@ -757,29 +1002,37 @@ static void gen_stmt(CG *cg, Stmt *s) {
     case S_WHILE:
     case S_DO:
     case S_FOR: gen_loop(cg, s); return;
-    case S_SWITCH: {
+    case S_SWITCH:
         emit(cg, "{");
         cg->indent++;
-        gen_switch_chain(cg, s->sw, switch_stmt_arm, NULL);
+        switch_stmt_body(cg, s->sw);
         cg->indent--;
         emit(cg, "}");
         return;
-    }
     case S_BREAK:
+        drop_vars_from(cg, cg->loop->scope_mark);
         cg->loop->brk_used = true;
         emit(cg, "goto nr_brk%d;", cg->loop->id);
         return;
     case S_CONTINUE:
+        drop_vars_from(cg, cg->loop->scope_mark);
         cg->loop->cont_used = true;
         emit(cg, "goto nr_cont%d;", cg->loop->id);
         return;
     case S_RETURN:
         if (cg->fn->kind == D_CTOR) {
+            drop_vars_from(cg, 0);
             emit(cg, "return nr_self_val;");
         } else if (s->expr) {
-            const char *v = gen_expr(cg, s->expr);
-            emit(cg, "return %s;", v);
+            Type *t = cg->fn->ret_type;
+            const char *v = type_is_owned(t) ? gen_owned_value(cg, s->expr) : gen_expr(cg, s->expr);
+            const char *r = new_tmp(cg);
+            emit(cg, "%s %s = %s;", ctype(t), r, v);
+            drop_temps(cg, mark);
+            drop_vars_from(cg, 0);
+            emit(cg, "return %s;", r);
         } else {
+            drop_vars_from(cg, 0);
             emit(cg, "return;");
         }
         return;
@@ -846,17 +1099,103 @@ static void emit_type_def(CG *cg, Type *t) {
     emit(cg, "};");
 }
 
+/* Cleanup, copy and equality functions for each struct and array type. */
+static void emit_value_functions(CG *cg, Program *prog) {
+    VEC(Type *) types = {0};
+    for (int i = 0; i < prog->all_structs.len; i++) vec_push(types, prog->all_structs.data[i]->type);
+    for (int i = 0; i < type_array_count(); i++) vec_push(types, type_array_at(i));
+
+    for (int i = 0; i < types.len; i++) {
+        Type *t = types.data[i];
+        const char *c = ctype(t);
+        if (needs_drop(t)) {
+            emit(cg, "static void nr_drop_%s(%s *p);", c, c);
+            emit(cg, "static %s nr_copy_%s(const %s *p);", c, c, c);
+        }
+        emit(cg, "static bool nr_eq_%s(const %s *a, const %s *b);", c, c, c);
+    }
+    emit(cg, "");
+
+    for (int i = 0; i < types.len; i++) {
+        Type *t = types.data[i];
+        const char *c = ctype(t);
+        bool drops = needs_drop(t);
+        if (t->kind == TY_ARRAY) {
+            Type *el = t->elem;
+            if (drops) {
+                emit(cg, "static void nr_drop_%s(%s *p) {", c, c);
+                emit(cg, "    for (int64_t i = %lld; i >= 0; i--) %s", (long long)t->length - 1, drop_stmt(el, "p->a[i]"));
+                emit(cg, "}");
+                emit(cg, "static %s nr_copy_%s(const %s *p) {", c, c, c);
+                emit(cg, "    %s r;", c);
+                emit(cg, "    for (int64_t i = 0; i < %lld; i++) r.a[i] = %s;", (long long)t->length, copy_expr(el, "p->a[i]"));
+                emit(cg, "    return r;");
+                emit(cg, "}");
+            }
+            emit(cg, "static bool nr_eq_%s(const %s *a, const %s *b) {", c, c, c);
+            emit(cg, "    for (int64_t i = 0; i < %lld; i++) {", (long long)t->length);
+            emit(cg, "        if (!%s) return false;", paren(eq_expr(el, "a->a[i]", "b->a[i]")));
+            emit(cg, "    }");
+            emit(cg, "    return true;");
+            emit(cg, "}");
+            continue;
+        }
+        Decl *s = t->decl;
+        if (drops) {
+            emit(cg, "static void nr_drop_%s(%s *p) {", c, c);
+            for (int j = s->members.len - 1; j >= 0; j--) {
+                Decl *m = s->members.data[j];
+                if (m->kind == D_FIELD && needs_drop(m->field_type)) {
+                    emit(cg, "    %s", drop_stmt(m->field_type, fmt_str("p->%s", field_name(m))));
+                }
+            }
+            emit(cg, "}");
+            emit(cg, "static %s nr_copy_%s(const %s *p) {", c, c, c);
+            emit(cg, "    %s r = *p;", c);
+            for (int j = 0; j < s->members.len; j++) {
+                Decl *m = s->members.data[j];
+                if (m->kind == D_FIELD && needs_drop(m->field_type)) {
+                    const char *f = field_name(m);
+                    emit(cg, "    r.%s = %s;", f, copy_expr(m->field_type, fmt_str("p->%s", f)));
+                }
+            }
+            emit(cg, "    return r;");
+            emit(cg, "}");
+        }
+        emit(cg, "static bool nr_eq_%s(const %s *a, const %s *b) {", c, c, c);
+        for (int j = 0; j < s->members.len; j++) {
+            Decl *m = s->members.data[j];
+            if (m->kind != D_FIELD) continue;
+            const char *f = field_name(m);
+            emit(cg, "    if (!%s) return false;",
+                 paren(eq_expr(m->field_type, fmt_str("a->%s", f), fmt_str("b->%s", f))));
+        }
+        emit(cg, "    return true;");
+        emit(cg, "}");
+    }
+    emit(cg, "");
+}
+
 static void gen_function(CG *cg, Decl *fn) {
     cg->fn = fn;
     cg->tmp = 0;
     cg->loop = NULL;
+    cg->temps.len = 0;
+    cg->drop_vars.len = 0;
+    cg->scope_marks.len = 0;
     emit(cg, "%s {", function_signature(fn));
     cg->indent++;
     if (fn->kind == D_CTOR) {
         emit(cg, "%s nr_self_val = {0};", ctype(fn->owner->type));
         emit(cg, "%s *nr_self = &nr_self_val;", ctype(fn->owner->type));
     }
+    push_scope(cg);
+    for (int i = 0; i < fn->params.len; i++) {
+        Var *p = fn->params.data[i];
+        if (!p->is_ref) add_drop_var(cg, fmt_str("nr_l_%s", p->name), p->type); /* value parameters are owned */
+    }
     for (int i = 0; i < fn->body->stmts.len; i++) gen_stmt(cg, fn->body->stmts.data[i]);
+    pop_scope(cg);
     if (fn->kind == D_CTOR) {
         emit(cg, "return nr_self_val;");
     } else if (fn->ret_type != type_void) {
@@ -928,13 +1267,15 @@ char *codegen_program(Program *prog) {
     }
     emit(&cg, "");
 
+    emit_value_functions(&cg, prog);
+
     /* Enum names. */
     for (int i = 0; i < prog->all_enums.len; i++) {
         Decl *d = prog->all_enums.data[i];
         StrBuf names = {0};
         for (int j = 0; j < d->values.len; j++) {
             const char *n = d->values.data[j].name;
-            sb_printf(&names, "%s{\"%s\", %zu}", j ? ", " : "", n, strlen(n));
+            sb_printf(&names, "%s%s", j ? ", " : "", string_init(n, strlen(n)));
         }
         emit(&cg, "const nr_String %s_names[] = {%s};", d->cname, sb_cstr(&names));
     }
@@ -951,7 +1292,7 @@ char *codegen_program(Program *prog) {
         case E_FLOAT: value = float_literal(v->float_value, t == type_f32); break;
         case E_CHAR: value = fmt_str("%llu", (unsigned long long)v->int_value); break;
         case E_BOOL: value = v->bool_value ? "true" : "false"; break;
-        case E_STRING: value = fmt_str("{%s, %zu}", c_string_literal(v->str, v->str_len), v->str_len); break;
+        case E_STRING: value = string_init(v->str, v->str_len); break;
         case E_ENUM_VALUE: value = fmt_str("%d", v->enum_index); break;
         default: value = "0"; break;
         }

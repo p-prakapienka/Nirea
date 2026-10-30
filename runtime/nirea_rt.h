@@ -10,9 +10,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* A String owns its bytes when cap > 0. With cap == 0 it points at static
+ * literal bytes (or is NULL, the empty string) and is copied to the heap on
+ * its first change. ptr, when not NULL, is always followed by a null byte. */
 typedef struct nr_String {
-    const char *ptr;
+    char *ptr;
     int64_t len;
+    int64_t cap;
 } nr_String;
 
 _Noreturn void nr_panic(const char *what, const char *loc);
@@ -24,16 +28,41 @@ void nr_print_f32(float v);
 void nr_print_f64(double v);
 void nr_print_bool(bool v);
 void nr_print_char(uint8_t v);
-void nr_print_str(nr_String s);
+void nr_print_str(const nr_String *s);
 void nr_print_newline(void);
 
-bool nr_str_eq(nr_String a, nr_String b);
 double nr_fmod(double a, double b);
 float nr_fmodf(float a, float b);
 
-static inline const char *nr_cstr(nr_String s) {
-    return s.ptr ? s.ptr : "";
+/* Strings (spec 6.5). */
+static inline nr_String nr_str_lit(const char *bytes, int64_t len) {
+    nr_String s = {(char *)bytes, len, 0};
+    return s;
 }
+
+static inline const char *nr_cstr(const nr_String *s) {
+    return s->ptr ? s->ptr : "";
+}
+
+void nr_str_free(nr_String *s);
+nr_String nr_str_copy(const nr_String *s);
+bool nr_str_eq(const nr_String *a, const nr_String *b);
+int32_t nr_str_length(const nr_String *s, const char *loc);
+uint8_t nr_str_char_at(const nr_String *s, int64_t index, const char *loc);
+void nr_str_set_char_at(nr_String *s, int64_t index, uint8_t c, const char *loc);
+void nr_str_append(nr_String *s, const nr_String *text);
+void nr_str_append_char(nr_String *s, uint8_t c);
+nr_String nr_str_substring(const nr_String *s, int64_t from, int64_t to, const char *loc);
+int32_t nr_str_index_of(const nr_String *s, const nr_String *text);
+int32_t nr_str_to_i32(const nr_String *s, const char *loc);
+int64_t nr_str_to_i64(const nr_String *s, const char *loc);
+double nr_str_to_f64(const nr_String *s, const char *loc);
+nr_String nr_str_of_i64(int64_t v);
+nr_String nr_str_of_u64(uint64_t v);
+nr_String nr_str_of_f32(float v);
+nr_String nr_str_of_f64(double v);
+nr_String nr_str_of_bool(bool v);
+nr_String nr_str_of_char(uint8_t v);
 
 /* Array indexing (spec 6.6). */
 static inline int64_t nr_index_i64(int64_t i, int64_t length, const char *loc) {

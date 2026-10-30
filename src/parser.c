@@ -354,6 +354,14 @@ static Expr *parse_primary(Parser *p) {
     case TOK_THIS:
         next(p);
         return new_expr(E_THIS, t->loc);
+    case TOK_STRING_KW:
+        if (peek_tok(p, 1)->kind == TOK_DOT) {
+            /* String.of(value) */
+            Expr *e = new_expr(E_NAME, t->loc);
+            e->name = next(p)->text;
+            return e;
+        }
+        fail_at(p, t->loc, "unexpected type name 'String' in expression");
     case TOK_LPAREN: {
         next(p);
         Expr *e = parse_expr(p);
@@ -783,7 +791,6 @@ static void parse_params(Parser *p, Decl *fn, bool allow_variadic) {
             TypeExpr *te = parse_type(p);
             bool is_ref = false;
             if (at(p, TOK_STAR)) {
-                if (allow_variadic) fail_at(p, cur(p)->loc, "extern \"C\" functions can't take references");
                 next(p);
                 is_ref = true;
             }

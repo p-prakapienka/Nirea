@@ -1,7 +1,7 @@
 // println and C printf share standard output, so output keeps program order (§15).
 
 extern "C" {
-    int printf(String format, ...);
+    int printf(String* format, ...);
 }
 
 void main() {
