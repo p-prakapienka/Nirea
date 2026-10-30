@@ -19,7 +19,7 @@ void main() {
     if (track.kind == Audio.Kind.SONG) {
         println("song");
     }
-    Speaker speaker;
+    Speaker speaker = Speaker();
     speaker.volume = Audio.DEFAULT_VOLUME;
     Audio.playTwice(speaker);
     Video.show();

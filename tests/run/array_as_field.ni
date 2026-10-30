@@ -19,7 +19,7 @@ struct Buffer {
 }
 
 void main() {
-    Buffer buffer;
+    Buffer buffer = Buffer();
     buffer.push(3);
     buffer.push(4);
     println(buffer.sum());          // expect: 7

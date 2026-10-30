@@ -21,6 +21,7 @@ void main() {
 
 - Free functions, structs with methods, interfaces and namespaces. No classes or inheritance.
 - Exclusive ownership checked by the compiler. No garbage collector and no user-visible raw pointers.
+- No hidden values: objects are created explicitly, as in `Circle circle = Circle();`, and a local variable must be assigned before it is used.
 - Ahead-of-time compilation to native code, with direct interoperability with C libraries.
 - A small language core, with further functionality in optional libraries.
 
@@ -221,7 +222,7 @@ Engine* make() {
 
 ## Status
 
-Nirea is at an early stage. The first compiler, `nirea`, implements version 0.10 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.11 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
 
 ## Building the compiler
 
@@ -265,5 +266,5 @@ Options:
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.10, preliminary)
+- [Language design specification](docs/language-design.md) (v0.11, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors

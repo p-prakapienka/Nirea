@@ -25,7 +25,7 @@ void tune(Engine* engine) {
 }
 
 void main() {
-    Vehicle car;
+    Vehicle car = Vehicle();
     car.engine.power = 100;
     upgrade(car);
     println(car.wheels);            // expect: 4

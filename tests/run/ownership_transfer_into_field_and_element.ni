@@ -10,19 +10,19 @@ struct Vehicle {
 }
 
 Engine createEngine(int power) {
-    Engine engine;
+    Engine engine = Engine();
     engine.power = power;
     return engine;
 }
 
 void main() {
     Engine first = createEngine(1);
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.engine = first;
     println(vehicle.engine.power);          // expect: 1
 
     Engine second = createEngine(2);
-    Engine[2] engines;
+    Engine[2] engines = Engine[2]();
     engines[1] = second;
     println(engines[1].power);              // expect: 2
 

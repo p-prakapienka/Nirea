@@ -21,7 +21,7 @@ int boosted(Engine engine) {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.engine.power = 1;
     vehicle.engine.name = "v";
     Engine* engine = vehicle.engine;

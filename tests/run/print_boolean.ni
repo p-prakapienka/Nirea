@@ -2,7 +2,7 @@
 
 void main() {
     boolean yes = true;
-    boolean no;
+    boolean no = false;
     println(yes);                   // expect: true
     println(no);                    // expect: false
     println(1 < 2);                 // expect: true

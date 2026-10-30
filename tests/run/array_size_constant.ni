@@ -7,10 +7,10 @@ namespace Limits {
 }
 
 void main() {
-    int[SIZE] values;
+    int[SIZE] values = int[SIZE]();
     println(values.length);         // expect: 3
-    int[Limits.CAPACITY] more;
+    int[Limits.CAPACITY] more = int[Limits.CAPACITY]();
     println(more.length);           // expect: 2
-    int[SIZE][Limits.CAPACITY] grid;
+    int[SIZE][Limits.CAPACITY] grid = int[SIZE][Limits.CAPACITY]();
     println(grid[2].length);        // expect: 2
 }

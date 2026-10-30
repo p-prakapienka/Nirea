@@ -6,7 +6,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     int mode = 1;
     switch (mode) {
         case 1 -> {

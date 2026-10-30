@@ -5,7 +5,7 @@ struct Tally {
 }
 
 void main() {
-    Tally tally;
+    Tally tally = Tally();
     tally.copy = 3;
     Tally other = tally.copy();
     println(other.copy);      // expect: 3

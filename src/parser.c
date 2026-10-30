@@ -317,6 +317,18 @@ static SwitchData *parse_switch_body(Parser *p, bool is_expr) {
 
 static Expr *parse_primary(Parser *p) {
     Token *t = cur(p);
+    if (primitive_for(t->kind) || t->kind == TOK_IDENT) {
+        /* T[N]() creates a zero-filled array (spec 6.6) */
+        int end = scan_type(p, p->pos);
+        if (end > 0 && p->toks[end - 1].kind == TOK_RBRACKET && p->toks[end].kind == TOK_LPAREN &&
+            p->toks[end + 1].kind == TOK_RPAREN) {
+            Expr *e = new_expr(E_NEW_ARRAY, t->loc);
+            e->cast_expr = parse_type(p);
+            expect(p, TOK_LPAREN);
+            expect(p, TOK_RPAREN);
+            return finish_expr(p, e);
+        }
+    }
     switch (t->kind) {
     case TOK_INT: {
         Expr *e = new_expr(E_INT, t->loc);

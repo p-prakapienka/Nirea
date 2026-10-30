@@ -1,7 +1,7 @@
 // T[A][B] is an array of A elements of type T[B] (§6.6).
 
 void main() {
-    int[2][3] grid;
+    int[2][3] grid = int[2][3]();
     grid[1][2] = 7;
     println(grid[1][2]);            // expect: 7
     println(grid[0][2]);            // expect: 0
@@ -17,7 +17,7 @@ void main() {
     }
     println(sum);                   // expect: 10
 
-    int[2][2][2] cube;
+    int[2][2][2] cube = int[2][2][2]();
     cube[1][0][1] = 5;
     println(cube[1][0][1]);         // expect: 5
     println(cube[1][0].length);     // expect: 2

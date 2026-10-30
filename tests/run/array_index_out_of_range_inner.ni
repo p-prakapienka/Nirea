@@ -7,7 +7,7 @@ int cell(int[2][3]* grid, int row, int column) {
 }
 
 void main() {
-    int[2][3] grid;
+    int[2][3] grid = int[2][3]();
     grid[1][2] = 7;
     println(cell(grid, 1, 2));      // expect: 7
     println(cell(grid, 1, 3));

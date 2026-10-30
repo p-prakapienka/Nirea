@@ -6,7 +6,7 @@ struct Engine {
 }
 
 void main() {
-    Engine[3] engines;
+    Engine[3] engines = Engine[3]();
     int i = 2;
     Engine* first = engines[0];
     engines[i].power = 5;

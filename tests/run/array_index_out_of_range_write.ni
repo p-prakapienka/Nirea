@@ -6,7 +6,7 @@ void store(int[3]* values, int index, int value) {
 }
 
 void main() {
-    int[3] values;
+    int[3] values = int[3]();
     store(values, 2, 5);
     println(values[2]);             // expect: 5
     store(values, 3, 5);

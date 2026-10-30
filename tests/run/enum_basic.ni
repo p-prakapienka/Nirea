@@ -34,7 +34,7 @@ void main() {
         println("wrapped");         // expect: wrapped
     }
 
-    Compass compass;
+    Compass compass = Compass();
     compass.heading = heading;
     Direction fromField = compass.heading;
     println(fromField);             // expect: EAST

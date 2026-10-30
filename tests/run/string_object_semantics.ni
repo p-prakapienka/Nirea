@@ -32,7 +32,7 @@ void main() {
     println(countWith(first));      // expect: 6
     println(first);                 // expect: Nirea
 
-    Named named;
+    Named named = Named();
     named.name = first.copy();
     String fromField = named.name.copy();
     fromField.setCharAt(0, 'J');

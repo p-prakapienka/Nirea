@@ -7,7 +7,7 @@ struct Square {
 }
 
 Square makeBlueSquare(int side) {
-    Square square;
+    Square square = Square();
     square.side = side;
     square.color = Color.BLUE;
     return square;

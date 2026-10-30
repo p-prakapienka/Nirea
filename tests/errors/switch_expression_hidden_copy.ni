@@ -9,8 +9,8 @@ struct Counter {
 }
 
 void main() {
-    Counter a;
-    Counter b;
+    Counter a = Counter();
+    Counter b = Counter();
     boolean pickA = true;
     (switch (pickA) { case true -> a; default -> b; }).bump(); // error
 }

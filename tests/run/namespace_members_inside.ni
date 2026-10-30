@@ -15,7 +15,7 @@ namespace Geometry {
     }
 
     Polygon makeSquare() {
-        Polygon polygon;
+        Polygon polygon = Polygon();
         polygon.kind = Kind.SQUARE;
         polygon.sides = SQUARE_SIDES;
         return polygon;

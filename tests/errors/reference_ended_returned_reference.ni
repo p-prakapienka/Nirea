@@ -15,7 +15,7 @@ struct Vehicle {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     Engine* engine = vehicle.getEngine();
     vehicle.speed = 1;
     engine.power = 1; // error: the reference ended

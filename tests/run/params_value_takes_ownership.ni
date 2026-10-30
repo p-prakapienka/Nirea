@@ -19,7 +19,7 @@ struct Vehicle {
 
 void main() {
     Engine engine = Engine(150);
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.setEngine(engine);
     println(vehicle.engine.power);    // expect: 150
     engine.power = 1;

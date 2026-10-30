@@ -29,19 +29,19 @@ void markCorner(int[2][2]* grid) {
 }
 
 void main() {
-    int[3] numbers;
+    int[3] numbers = int[3]();
     fill(numbers, 5);
     println(numbers[0]);            // expect: 5
     println(numbers[2]);            // expect: 7
     println(sum(numbers));          // expect: 18
 
-    Counter[2] counters;
+    Counter[2] counters = Counter[2]();
     bumpAll(counters);
     bumpAll(counters);
     println(counters[0].count);     // expect: 2
     println(counters[1].count);     // expect: 20
 
-    int[2][2] grid;
+    int[2][2] grid = int[2][2]();
     markCorner(grid);
     println(grid[1][1]);            // expect: 4
 

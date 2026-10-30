@@ -5,7 +5,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     int attempts = 0;
     while (attempts < 3) {
         Engine taken = engine;

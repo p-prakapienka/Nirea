@@ -1,9 +1,10 @@
-/* Flow-sensitive ownership and reference checking (spec 7.1, 9.3). Semantic
- * analysis has already marked every local variable whose object goes to a new
- * owner (Expr.transfers_ownership). On each path, this pass follows which
- * owned locals have given their object away and which reference variables
- * have ended, and rejects later uses of them. It also rejects calls that reach
- * the same object in two ways.
+/* Flow-sensitive checking of initialisation, ownership and references (spec
+ * 6.8, 7.1, 9.3). Semantic analysis has already marked every local variable
+ * whose object goes to a new owner (Expr.transfers_ownership). On each path,
+ * this pass follows which locals have no value, because they were declared
+ * without one or gave their object away, and which reference variables have
+ * ended, and rejects later uses of them. It also rejects calls that reach the
+ * same object in two ways.
  *
  * Objects are compared as paths from a root (a local variable, a parameter or
  * `this`) through fields and array elements. Two objects overlap when one
@@ -15,9 +16,9 @@
 #include "lexer.h"
 #include "sema.h"
 
-/* Per-variable state. For owned locals: owns its object, gave it away, or
- * gave it away on some paths. For reference variables: usable, ended, or
- * ended on some paths. */
+/* Per-variable state. For other locals: has a value, has none (declared
+ * without one, or gave its object away), or has none on some paths. For
+ * reference variables: usable, ended, or ended on some paths. */
 enum { USABLE = 0, GONE = 1, MAYBE_GONE = 2 };
 
 typedef struct State {
@@ -89,9 +90,9 @@ static bool state_equal(OCtx *c, State *a, State *b) {
     return memcmp(a->v, b->v, (size_t)c->n) == 0;
 }
 
-/* Owned locals, including value parameters (spec 7.3). */
+/* Locals that hold a value, including value parameters (spec 6.8, 7.3). */
 static bool tracked(Var *v) {
-    return !v->is_ref && v->type && type_is_owned(v->type);
+    return !v->is_ref;
 }
 
 static bool is_ref_var(Var *v) {
@@ -285,6 +286,7 @@ static bool is_new_object(Expr *e) {
     case E_CALL_CTOR:
     case E_CALL_STRING:
     case E_COPY:
+    case E_NEW_ARRAY:
     case E_STRING:
     case E_CONST:
     case E_BINARY: return true; /* string concatenation */
@@ -322,7 +324,18 @@ static void use_var(OCtx *c, Expr *e, State *s) {
     if (!tracked(v) || !s->reachable) return;
     uint8_t st = s->v[v->index];
     if (st != USABLE) {
-        if (error_suppress == 0) {
+        if (error_suppress == 0 && !c->transfer_loc[v->index].file) {
+            /* declared without a value (spec 6.8) */
+            if (st == GONE) {
+                error_at(e->loc, "'%s' can't be used here: it has no value yet; assign one to it first", v->name);
+            } else {
+                error_at(e->loc, "'%s' can't be used here: it may have no value on some path; assign one to it on every "
+                                 "path first",
+                         v->name);
+            }
+            note_at(v->loc, "'%s' is declared here without a value", v->name);
+            s->v[v->index] = USABLE; /* report each use only once */
+        } else if (error_suppress == 0) {
             if (st == GONE) {
                 error_at(e->loc, "'%s' can't be used here: its object was given to a new owner", v->name);
             } else {
@@ -617,7 +630,11 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
             return;
         }
         if (st->init) visit_expr(c, st->init, s);
-        if (s->reachable && tracked(st->var)) s->v[st->var->index] = USABLE;
+        if (s->reachable && tracked(st->var)) {
+            /* without an initialiser, it has no value until assigned (spec 6.8) */
+            s->v[st->var->index] = st->init ? USABLE : GONE;
+            if (!st->init) c->transfer_loc[st->var->index] = (Loc){0};
+        }
         return;
     case S_EXPR: visit_expr(c, st->expr, s); return;
     case S_ASSIGN: {

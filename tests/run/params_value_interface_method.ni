@@ -22,14 +22,14 @@ struct Box : Store {
 }
 
 void fill(Store* store) {
-    Item item;
+    Item item = Item();
     item.weight = 4;
     println(store.weightOf(item));    // expect: 8
     store.put(item);
 }
 
 void main() {
-    Box box;
+    Box box = Box();
     fill(box);
     println(box.content.weight);      // expect: 4
 }

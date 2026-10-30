@@ -11,13 +11,11 @@ struct Device {
 }
 
 void main() {
-    Mode mode;
-    println(mode);                  // expect: OFF
-    Device device;
+    Device device = Device();
     println(device.mode);           // expect: OFF
-    Mode[2] modes;
+    Mode[2] modes = Mode[2]();
     println(modes[1]);              // expect: OFF
-    if (mode == Mode.OFF) {
+    if (device.mode == Mode.OFF) {
         println("first value");     // expect: first value
     }
 }

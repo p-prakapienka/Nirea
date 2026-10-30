@@ -9,7 +9,7 @@ void addFrom(Counter* target, Counter* source) {
 }
 
 void main() {
-    Counter counter;
+    Counter counter = Counter();
     addFrom(counter, counter.copy());
     addFrom(counter, counter); // error: this call already reaches counter through argument 1
 }

@@ -14,7 +14,7 @@ void main() {
     println(first[0]);              // expect: 10
     println(second[0]);             // expect: 1
 
-    Cell[2] original;
+    Cell[2] original = Cell[2]();
     original[0].value = 1;
     Cell[2] duplicate = original.copy();
     duplicate[0].value = 2;

@@ -15,7 +15,7 @@ void install(Engine* engine) {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     install(vehicle.engine);
     install(vehicle.spares[1]);
     install(vehicle.spares[1]);

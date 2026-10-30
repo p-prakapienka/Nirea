@@ -13,7 +13,7 @@ void main() {
     println(text.indexOf("world"));      // expect: 7
     println(text.indexOf("moon"));       // expect: -1
     println(text.indexOf(""));           // expect: 0
-    String empty;
+    String empty = "";
     println(empty.length());             // expect: 0
     empty.appendChar('x');
     println(empty);                      // expect: x

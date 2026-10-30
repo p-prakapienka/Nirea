@@ -1,5 +1,5 @@
 // Struct fields start at their zero value, including nested structs and
-// arrays, whether the value comes from a declaration or from T() (§5.4, §6.8).
+// arrays, when the struct is created with T() (§5.4, §6.8).
 
 enum Level {
     LOW,
@@ -25,7 +25,7 @@ struct Outer {
 }
 
 void main() {
-    Outer outer;
+    Outer outer = Outer();
     println(outer.small);           // expect: 0
     println(outer.big);             // expect: 0
     if (outer.ratio == 0.0) {
@@ -47,8 +47,4 @@ void main() {
     }
     println(outer.values[2]);       // expect: 0
     println(outer.inners[1].count); // expect: 0
-
-    Outer created = Outer();
-    println(created.inners[0].count);   // expect: 0
-    println(created.level);             // expect: LOW
 }

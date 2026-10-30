@@ -18,7 +18,7 @@ Engine copyParameter(Engine* engine) {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.engine.power = 10;
 
     Engine fromField = vehicle.engine.copy();
@@ -29,7 +29,7 @@ void main() {
     Engine fromParameter = copyParameter(vehicle.engine);
     println(fromParameter.power);   // expect: 10
 
-    Engine[2] engines;
+    Engine[2] engines = Engine[2]();
     engines[0].power = 20;
     Engine fromElement = engines[0].copy();
     fromElement.power = 21;
@@ -43,7 +43,7 @@ void main() {
     fromReference.power = 12;
     println(vehicle.engine.power);  // expect: 10
 
-    Vehicle other;
+    Vehicle other = Vehicle();
     other.engine = vehicle.engine.copy();
     println(other.engine.power);    // expect: 10
 }

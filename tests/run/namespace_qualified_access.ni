@@ -20,7 +20,7 @@ namespace Audio {
 
 void main() {
     Audio.play();                   // expect: Playing audio
-    Audio.AudioEngine engine;
+    Audio.AudioEngine engine = Audio.AudioEngine();
     engine.initialise();
     println(engine.volume);         // expect: 5
     Audio.AudioEngine other = Audio.AudioEngine();

@@ -875,6 +875,12 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     }
     case E_SWITCH: return gen_switch_expr(cg, e);
     case E_TO_IFACE: return gen_iface_arg(cg, e);
+    case E_NEW_ARRAY: {
+        const char *t = new_tmp(cg);
+        emit(cg, "%s %s = %s;", ctype(e->type), t, zero_init(e->type));
+        add_temp(cg, t, e->type);
+        return t;
+    }
     default: return "0";
     }
 }

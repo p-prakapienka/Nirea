@@ -11,13 +11,13 @@ struct Point {
 }
 
 void main() {
-    Point[3] points;
+    Point[3] points = Point[3]();
     points[1].x = 5;
     points[1].y = 6;
     println(points[0].x);           // expect: 0
     println(points[1].sum());       // expect: 11
 
-    Point extra;
+    Point extra = Point();
     extra.x = 9;
     points[2] = extra;
     println(points[2].x);           // expect: 9

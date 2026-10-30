@@ -7,7 +7,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     engine.name = "v8";
     println(engine.equals(engine));      // expect: true
     Engine* reference = engine;

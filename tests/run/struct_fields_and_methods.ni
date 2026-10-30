@@ -24,7 +24,7 @@ struct Counter {
 }
 
 void main() {
-    Counter counter;
+    Counter counter = Counter();
     counter.step = 3;
     counter.increment();
     println(counter.count);         // expect: 3

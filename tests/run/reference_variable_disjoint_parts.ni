@@ -13,7 +13,7 @@ struct Vehicle {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     Engine* engine = vehicle.engine;
     vehicle.speed = 50;
     engine.power = 120;

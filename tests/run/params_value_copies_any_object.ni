@@ -47,7 +47,7 @@ void main() {
     println(engine.power);               // expect: 1
     println(engine.name);                // expect: e
 
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.engine = Engine(2, "v");
     vehicle.spares[1] = Engine(3, "s");
     println(boosted(vehicle.engine));    // expect: 102

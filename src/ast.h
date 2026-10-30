@@ -123,6 +123,7 @@ typedef enum ExprKind {
     E_CAST,
     E_SWITCH,
     E_ARRAY_INIT, /* {a, b, c}, only as a declaration initialiser */
+    E_NEW_ARRAY,  /* T[N](): a zero-filled array (cast_expr is T[N]) */
 
     /* resolved */
     E_VAR,         /* local variable or parameter */
@@ -208,7 +209,7 @@ struct Expr {
     int op; /* TokenKind for unary/binary */
 
     Type *cast_type;     /* E_CAST target, E_CONVERT target */
-    TypeExpr *cast_expr; /* E_CAST target syntax */
+    TypeExpr *cast_expr; /* E_CAST target syntax, E_NEW_ARRAY type */
 
     SwitchData *sw;
 

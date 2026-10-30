@@ -32,7 +32,7 @@ Engine* stronger(Engine* a, Engine* b) {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.getEngine().power = 90;
     vehicle.getSpare(2).power = 30;
     vehicle.getName().append("car");
@@ -40,9 +40,9 @@ void main() {
     println(vehicle.spares[2].power);         // expect: 30
     println(vehicle.name);                    // expect: car
 
-    Engine first;
+    Engine first = Engine();
     first.power = 5;
-    Engine second;
+    Engine second = Engine();
     second.power = 8;
     Engine* winner = stronger(first, second);
     winner.power = winner.power + 1;

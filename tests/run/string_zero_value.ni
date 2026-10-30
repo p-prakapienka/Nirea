@@ -5,20 +5,15 @@ struct Label {
 }
 
 void main() {
-    String empty;
-    if (empty == "") {
-        println("local is empty");      // expect: local is empty
-    }
-    print("[");
-    print(empty);
-    println("]");                       // expect: []
-
-    Label label;
+    Label label = Label();
     if (label.text == "") {
         println("field is empty");      // expect: field is empty
     }
+    print("[");
+    print(label.text);
+    println("]");                       // expect: []
 
-    String[2] names;
+    String[2] names = String[2]();
     if (names[1] == "") {
         println("element is empty");    // expect: element is empty
     }

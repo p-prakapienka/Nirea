@@ -26,9 +26,9 @@ Shape* larger(Shape* a, Shape* b) {
 }
 
 void main() {
-    Square small;
+    Square small = Square();
     small.side = 2;
-    Square big;
+    Square big = Square();
     big.side = 5;
     println(larger(small, big).area());       // expect: 25
     Shape* shape = small.getShape();

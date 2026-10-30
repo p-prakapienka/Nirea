@@ -1565,6 +1565,15 @@ static Type *check_expr(Ctx *ctx, Expr *e, Type *expected) {
     case E_ARRAY_INIT:
         error_at(e->loc, "an array initialiser '{...}' can only initialise a variable declaration");
         return set_type(e, type_error);
+    case E_NEW_ARRAY: {
+        /* T[N](): a zero-filled array (spec 6.6) */
+        TypeExpr *te = e->cast_expr;
+        if (!te->prim && !te->qualifier && find_scope(ctx, te->name)) {
+            error_at(e->loc, "'%s' is a variable, and an array element can't be called", te->name);
+            return set_type(e, type_error);
+        }
+        return set_type(e, resolve_type(ctx, te, false, "an array element"));
+    }
     default:
         /* Already resolved (e.g. an implicit field reference). */
         return e->type ? e->type : set_type(e, type_error);
@@ -1623,6 +1632,7 @@ static bool is_new_object(Expr *e) {
     case E_CALL_CTOR:
     case E_CALL_STRING:
     case E_COPY:
+    case E_NEW_ARRAY:
     case E_STRING:
     case E_CONST:
     case E_BINARY: return true;
@@ -1674,6 +1684,7 @@ static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     case E_CALL_CTOR:
     case E_CALL_STRING:
     case E_COPY:
+    case E_NEW_ARRAY:
     case E_STRING:
     case E_CONST:
     case E_BINARY: return; /* new objects; E_BINARY is a string concatenation */
@@ -2149,12 +2160,7 @@ static void check_var_decl(Ctx *ctx, Stmt *s) {
         return;
     }
     v->type = resolve_type(ctx, v->type_expr, false, "a variable");
-    if (s->init) {
-        check_initialiser(ctx, v, &s->init);
-    } else if (v->type->kind == TY_STRUCT && v->type->decl->ctor) {
-        error_at(v->loc, "struct '%s' has a constructor, so '%s' needs an initialiser, e.g. %s %s = %s(...)",
-                 type_name(v->type), v->name, type_name(v->type), v->name, v->type->decl->name);
-    }
+    if (s->init) check_initialiser(ctx, v, &s->init); /* without one, it must be assigned before use (spec 6.8) */
     if (declare_name(ctx, v->name, v->loc, v)) add_local(ctx, v);
 }
 

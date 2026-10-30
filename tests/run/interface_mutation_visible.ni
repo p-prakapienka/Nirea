@@ -31,15 +31,15 @@ void incrementThrice(Counter* counter) {
 }
 
 void main() {
-    Clicker clicker;
+    Clicker clicker = Clicker();
     incrementThrice(clicker);       // expect: 3
     println(clicker.clicks);        // expect: 3
 
-    Panel panel;
+    Panel panel = Panel();
     incrementThrice(panel.clicker); // expect: 3
     println(panel.clicker.value()); // expect: 3
 
-    Clicker[2] clickers;
+    Clicker[2] clickers = Clicker[2]();
     incrementThrice(clickers[1]);   // expect: 3
     incrementThrice(clickers[1]);   // expect: 6
     println(clickers[0].clicks);    // expect: 0

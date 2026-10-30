@@ -6,7 +6,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     for (int i = 0; i < 3; i++) {
         Engine taken = engine; // error
     }

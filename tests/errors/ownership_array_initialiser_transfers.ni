@@ -5,8 +5,8 @@ struct Engine {
 }
 
 void main() {
-    Engine left;
-    Engine right;
+    Engine left = Engine();
+    Engine right = Engine();
     Engine[2] pair = {left, right};
     println(left.power); // error
 }

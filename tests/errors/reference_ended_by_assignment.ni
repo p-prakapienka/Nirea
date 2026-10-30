@@ -5,7 +5,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     Engine* reference = engine;
     engine = Engine();
     reference.power = 1; // error: the reference ended

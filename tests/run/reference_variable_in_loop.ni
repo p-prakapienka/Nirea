@@ -6,7 +6,7 @@ struct Counter {
 }
 
 void main() {
-    Counter[2] counters;
+    Counter[2] counters = Counter[2]();
     for (int i = 0; i < 4; i++) {
         Counter* counter = counters[i % 2];
         counter.value = counter.value + i;

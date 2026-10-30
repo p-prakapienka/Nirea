@@ -15,7 +15,7 @@ struct Vec2 {
 }
 
 void main() {
-    Vec2 v;
+    Vec2 v = Vec2();
     v.x = 1.5;
     v.y = 0.5;
     println(v.lengthSquared());     // expect: 2.5
