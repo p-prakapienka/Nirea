@@ -118,7 +118,11 @@ static int scan_type(Parser *p, int i) {
 
 static bool at_declaration(Parser *p) {
     int end = scan_type(p, p->pos);
-    return end >= 0 && p->toks[end].kind == TOK_IDENT;
+    if (end < 0) return false;
+    if (p->toks[end].kind == TOK_IDENT) return true;
+    /* `Engine* e = ...;` or `Engine* e;`: a reference variable, rejected later */
+    return p->toks[end].kind == TOK_STAR && p->toks[end + 1].kind == TOK_IDENT &&
+           (p->toks[end + 2].kind == TOK_ASSIGN || p->toks[end + 2].kind == TOK_SEMI);
 }
 
 static TypeExpr *parse_type(Parser *p) {
@@ -532,6 +536,9 @@ static Var *new_var(VarKind kind, const char *name, Loc loc, TypeExpr *te) {
 /* Parses `type name [= init]` without the ';'. */
 static Stmt *parse_var_decl(Parser *p) {
     TypeExpr *te = parse_type(p);
+    if (at(p, TOK_STAR)) {
+        fail_at(p, cur(p)->loc, "references (T*) can only be parameter types, not local variables");
+    }
     Token *name = expect(p, TOK_IDENT);
     Stmt *s = new_stmt(S_VAR, name->loc);
     s->var = new_var(VAR_LOCAL, name->text, name->loc, te);
@@ -704,11 +711,26 @@ static void parse_params(Parser *p, Decl *fn, bool allow_variadic) {
                 break;
             }
             TypeExpr *te = parse_type(p);
+            bool is_ref = false;
+            if (at(p, TOK_STAR)) {
+                if (allow_variadic) fail_at(p, cur(p)->loc, "extern \"C\" functions can't take references");
+                next(p);
+                is_ref = true;
+            }
             Token *name = expect(p, TOK_IDENT);
-            vec_push(fn->params, new_var(VAR_PARAM, name->text, name->loc, te));
+            Var *param = new_var(VAR_PARAM, name->text, name->loc, te);
+            param->is_ref = is_ref;
+            vec_push(fn->params, param);
         } while (accept(p, TOK_COMMA));
     }
     expect(p, TOK_RPAREN);
+}
+
+/* References (T*) exist only as parameter types (spec 7.3). */
+static void reject_reference(Parser *p, const char *what) {
+    if (at(p, TOK_STAR)) {
+        fail_at(p, cur(p)->loc, fmt_str("references (T*) can only be parameter types, not %s", what));
+    }
 }
 
 static Decl *parse_struct(Parser *p, Decl *ns) {
@@ -746,6 +768,7 @@ static Decl *parse_struct(Parser *p, Decl *ns) {
             continue;
         }
         TypeExpr *te = parse_return_type(p);
+        reject_reference(p, "fields and return values");
         Token *mname = expect(p, TOK_IDENT);
         if (at(p, TOK_LPAREN)) {
             Decl *m = new_decl(p, D_METHOD, mname->text, mname->loc, ns);
@@ -782,6 +805,7 @@ static Decl *parse_interface(Parser *p, Decl *ns) {
         if (at(p, TOK_EOF)) fail_expected(p, "'}'");
         if (at(p, TOK_PRIVATE)) fail_at(p, cur(p)->loc, "interface methods can't be private");
         TypeExpr *te = parse_return_type(p);
+        reject_reference(p, "return values");
         Token *mname = expect(p, TOK_IDENT);
         if (!at(p, TOK_LPAREN)) fail_at(p, mname->loc, "interfaces can only declare methods");
         Decl *m = new_decl(p, D_IFACE_METHOD, mname->text, mname->loc, ns);
@@ -835,6 +859,7 @@ static void parse_extern(Parser *p, Decl *ns, DeclVec *out) {
     while (!at(p, TOK_RBRACE)) {
         if (at(p, TOK_EOF)) fail_expected(p, "'}'");
         TypeExpr *te = parse_return_type(p);
+        reject_reference(p, "return values");
         Token *name = expect(p, TOK_IDENT);
         Decl *d = new_decl(p, D_EXTERN_FUNC, name->text, name->loc, ns);
         d->ret_expr = te;
@@ -881,6 +906,7 @@ static void parse_decl(Parser *p, Decl *ns, DeclVec *out) {
         fail_expected(p, "a declaration");
     }
     TypeExpr *te = parse_return_type(p);
+    reject_reference(p, "return values and global variables");
     Token *name = expect(p, TOK_IDENT);
     if (at(p, TOK_ASSIGN) || at(p, TOK_SEMI)) {
         fail_at(p, name->loc, "global variables aren't supported; use a constant ('const') or a local variable");

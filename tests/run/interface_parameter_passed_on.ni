@@ -18,11 +18,11 @@ struct Rect : Shape {
     }
 }
 
-int measure(Shape shape) {
+int measure(Shape* shape) {
     return shape.area();
 }
 
-int measureTwice(Shape shape) {
+int measureTwice(Shape* shape) {
     return measure(shape) + measure(shape);
 }
 

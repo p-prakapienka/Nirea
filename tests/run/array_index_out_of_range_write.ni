@@ -1,7 +1,7 @@
 // Writing to an element outside 0 to N - 1 is a runtime error (§6.6).
 // runtime-error: index out of range
 
-void store(int[3] values, int index, int value) {
+void store(int[3]* values, int index, int value) {
     values[index] = value;
 }
 

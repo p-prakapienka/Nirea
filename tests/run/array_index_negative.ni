@@ -1,7 +1,7 @@
 // A negative index is out of range (§6.6).
 // runtime-error: index out of range
 
-int elementAt(int[3] values, int index) {
+int elementAt(int[3]* values, int index) {
     return values[index];
 }
 

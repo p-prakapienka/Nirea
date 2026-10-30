@@ -25,11 +25,11 @@ struct Box : Named, Measured {
     }
 }
 
-void showName(Named named) {
+void showName(Named* named) {
     println(named.name());
 }
 
-void showSize(Measured measured) {
+void showSize(Measured* measured) {
     println(measured.size(10));
 }
 

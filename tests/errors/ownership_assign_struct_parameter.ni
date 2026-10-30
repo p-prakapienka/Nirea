@@ -1,10 +1,10 @@
-// A function can't assign to a struct parameter as a whole (§7.3).
+// A function can't assign to a struct reference parameter as a whole (§7.3).
 
 struct Engine {
     int power;
 }
 
-void reset(Engine engine) {
+void reset(Engine* engine) {
     engine = Engine(); // error
 }
 

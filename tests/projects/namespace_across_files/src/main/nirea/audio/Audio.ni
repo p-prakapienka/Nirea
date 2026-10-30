@@ -22,7 +22,7 @@ namespace Audio {
         return track;
     }
 
-    void playTwice(Playable playable) {
+    void playTwice(Playable* playable) {
         playable.play();
         playable.play();
     }

@@ -153,7 +153,7 @@ static const char *int_literal(Type *t, uint64_t mag, bool neg) {
 /* Names                                                                   */
 
 static const char *var_ref(Var *v) {
-    if (v->kind == VAR_PARAM && type_is_owned(v->type)) return fmt_str("(*l_%s)", v->name);
+    if (v->kind == VAR_PARAM && v->is_ref && type_is_owned(v->type)) return fmt_str("(*l_%s)", v->name);
     return fmt_str("l_%s", v->name);
 }
 
@@ -257,9 +257,10 @@ static const char *gen_iface_arg(CG *cg, Expr *e) {
     return gen_expr(cg, e);
 }
 
-static const char *gen_arg(CG *cg, Expr *arg, Type *param_type, bool is_extern) {
+static const char *gen_arg(CG *cg, Expr *arg, Var *param, bool is_extern) {
+    Type *param_type = param ? param->type : NULL;
     if (param_type && param_type->kind == TY_INTERFACE) return gen_iface_arg(cg, arg);
-    if (param_type && type_is_owned(param_type)) return gen_ref(cg, arg);
+    if (param_type && type_is_owned(param_type) && param->is_ref) return gen_ref(cg, arg);
     if (is_extern && arg->kind == E_STRING) return c_string_literal(arg->str, arg->str_len);
     const char *v = gen_expr(cg, arg);
     if (is_extern) {
@@ -287,8 +288,8 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
     case E_CALL_FUNC: {
         bool is_extern = fn->kind == D_EXTERN_FUNC;
         for (int i = 0; i < e->args.len; i++) {
-            Type *pt = i < fn->params.len ? fn->params.data[i]->type : NULL;
-            sb_printf(&args, "%s%s", i ? ", " : "", gen_arg(cg, e->args.data[i], pt, is_extern));
+            Var *param = i < fn->params.len ? fn->params.data[i] : NULL;
+            sb_printf(&args, "%s%s", i ? ", " : "", gen_arg(cg, e->args.data[i], param, is_extern));
         }
         const char *call = fmt_str("%s(%s)", fn->cname, sb_cstr(&args));
         if (is_extern && fn->ret_type == type_char) call = fmt_str("(uint8_t)%s", call);
@@ -298,7 +299,7 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
         const char *recv = gen_ref(cg, e->base);
         sb_append(&args, recv);
         for (int i = 0; i < e->args.len; i++) {
-            sb_printf(&args, ", %s", gen_arg(cg, e->args.data[i], fn->params.data[i]->type, false));
+            sb_printf(&args, ", %s", gen_arg(cg, e->args.data[i], fn->params.data[i], false));
         }
         return finish_call(cg, fn->ret_type, fmt_str("%s(%s)", fn->cname, sb_cstr(&args)), want_value);
     }
@@ -306,7 +307,7 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
         const char *recv = gen_expr(cg, e->base);
         sb_printf(&args, "%s.self", recv);
         for (int i = 0; i < e->args.len; i++) {
-            sb_printf(&args, ", %s", gen_arg(cg, e->args.data[i], fn->params.data[i]->type, false));
+            sb_printf(&args, ", %s", gen_arg(cg, e->args.data[i], fn->params.data[i], false));
         }
         return finish_call(cg, fn->ret_type, fmt_str("%s.vt->m_%s(%s)", recv, fn->name, sb_cstr(&args)), want_value);
     }
@@ -318,7 +319,7 @@ static const char *gen_call(CG *cg, Expr *e, bool want_value) {
             return t;
         }
         for (int i = 0; i < e->args.len; i++) {
-            sb_printf(&args, "%s%s", i ? ", " : "", gen_arg(cg, e->args.data[i], s->ctor->params.data[i]->type, false));
+            sb_printf(&args, "%s%s", i ? ", " : "", gen_arg(cg, e->args.data[i], s->ctor->params.data[i], false));
         }
         return finish_call(cg, s->type, fmt_str("%s(%s)", s->ctor->cname, args.len ? sb_cstr(&args) : ""), true);
     }
@@ -790,7 +791,7 @@ static void gen_stmt(CG *cg, Stmt *s) {
 
 static const char *param_decl(Var *p) {
     Type *t = p->type;
-    if (type_is_owned(t)) return fmt_str("%s *l_%s", ctype(t), p->name);
+    if (type_is_owned(t) && p->is_ref) return fmt_str("%s *l_%s", ctype(t), p->name);
     return fmt_str("%s l_%s", ctype(t), p->name);
 }
 

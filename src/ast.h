@@ -97,7 +97,8 @@ struct Var {
     Loc loc;
     TypeExpr *type_expr;
     Type *type;
-    int index; /* per function, for ownership analysis */
+    bool is_ref; /* reference parameter, written T* (spec 7.3) */
+    int index;   /* per function, for ownership analysis */
     const char *cname;
 };
 

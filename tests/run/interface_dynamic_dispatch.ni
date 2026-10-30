@@ -31,7 +31,7 @@ struct Rectangle : Shape {
     }
 }
 
-void describe(Shape shape) {
+void describe(Shape* shape) {
     print(shape.name());
     print(" ");
     println(shape.area());

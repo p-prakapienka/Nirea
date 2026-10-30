@@ -1,5 +1,5 @@
-// Calls never take ownership of their arguments, and a call result passed as
-// an argument lives until the statement ends (§7.1, §7.3).
+// A reference parameter doesn't take ownership of its argument, and a call
+// result passed as an argument lives until the statement ends (§7.1, §7.3).
 
 struct Engine {
     int power;
@@ -11,7 +11,7 @@ Engine createEngine(int power) {
     return engine;
 }
 
-void inspect(Engine engine) {
+void inspect(Engine* engine) {
     println(engine.power);
 }
 

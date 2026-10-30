@@ -1,4 +1,4 @@
-// Fields, parameters, array elements, this and aliases can't be moved out of,
+// Fields, reference parameters, array elements, this and aliases can't be moved out of,
 // but copy() gives an independent value from each of them (§7.1, §7.2).
 
 struct Engine {
@@ -13,7 +13,7 @@ struct Vehicle {
     Engine engine;
 }
 
-Engine copyParameter(Engine engine) {
+Engine copyParameter(Engine* engine) {
     return engine.copy();
 }
 

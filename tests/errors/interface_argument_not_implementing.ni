@@ -9,7 +9,7 @@ struct Label {
     String text;
 }
 
-int measure(Shape shape) {
+int measure(Shape* shape) {
     return shape.area();
 }
 

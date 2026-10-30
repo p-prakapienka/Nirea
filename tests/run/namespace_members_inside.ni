@@ -21,7 +21,7 @@ namespace Geometry {
         return polygon;
     }
 
-    int perimeter(Polygon polygon, int length) {
+    int perimeter(Polygon* polygon, int length) {
         return polygon.sides * length;
     }
 

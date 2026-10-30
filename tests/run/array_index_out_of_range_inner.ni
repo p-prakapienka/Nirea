@@ -2,7 +2,7 @@
 // dimension (§6.6).
 // runtime-error: index out of range
 
-int cell(int[2][3] grid, int row, int column) {
+int cell(int[2][3]* grid, int row, int column) {
     return grid[row][column];
 }
 

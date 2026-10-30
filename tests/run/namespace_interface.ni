@@ -6,7 +6,7 @@ namespace Graphics {
         void draw();
     }
 
-    void render(Drawable shape) {
+    void render(Drawable* shape) {
         shape.draw();
     }
 }

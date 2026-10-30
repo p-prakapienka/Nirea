@@ -1,7 +1,7 @@
 // Reading an element at an index outside 0 to N - 1 is a runtime error (§6.6).
 // runtime-error: index out of range
 
-int elementAt(int[3] values, int index) {
+int elementAt(int[3]* values, int index) {
     return values[index];
 }
 

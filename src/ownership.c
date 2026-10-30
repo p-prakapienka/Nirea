@@ -60,8 +60,49 @@ static bool state_equal(OCtx *c, State *a, State *b) {
     return memcmp(a->v, b->v, (size_t)c->n) == 0;
 }
 
+/* Owned locals, including value parameters (spec 7.3). */
 static bool tracked(Var *v) {
-    return v->kind == VAR_LOCAL && v->type && type_is_owned(v->type);
+    return (v->kind == VAR_LOCAL || !v->is_ref) && v->type && type_is_owned(v->type);
+}
+
+/* The local variable whose storage an expression refers to, if any. */
+static Var *root_var(Expr *e) {
+    switch (e->kind) {
+    case E_VAR: return e->var;
+    case E_FIELD:
+    case E_INDEX:
+    case E_TO_IFACE: return root_var(e->base);
+    case E_ALIAS: return root_var(e->alias->expr);
+    default: return NULL;
+    }
+}
+
+static Var *call_param(Expr *call, int i) {
+    Decl *fn = call->decl;
+    if (call->kind == E_CALL_CTOR) fn = fn->ctor;
+    if (!fn || i >= fn->params.len) return NULL;
+    return fn->params.data[i];
+}
+
+/* A call can't move a local into a value parameter while it also borrows
+ * that local through the receiver or a reference parameter. */
+static void check_borrow_and_move(Expr *call) {
+    if (error_suppress > 0) return;
+    for (int i = 0; i < call->args.len; i++) {
+        Expr *arg = call->args.data[i];
+        if (arg->kind != E_VAR || !arg->is_move) continue;
+        bool borrowed = false;
+        if ((call->kind == E_CALL_METHOD || call->kind == E_CALL_IFACE) && root_var(call->base) == arg->var) borrowed = true;
+        for (int j = 0; j < call->args.len && !borrowed; j++) {
+            if (j == i) continue;
+            Var *p = call_param(call, j);
+            Expr *other = call->args.data[j];
+            if (p && (p->is_ref || p->type->kind == TY_INTERFACE) && root_var(other) == arg->var) borrowed = true;
+        }
+        if (borrowed) {
+            error_at(arg->loc, "'%s' can't be passed by value while the same call also borrows it", arg->var->name);
+        }
+    }
 }
 
 static void visit_expr(OCtx *c, Expr *e, State *s);
@@ -130,9 +171,13 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_CALL_IFACE:
         visit_expr(c, e->base, s);
         for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
+        check_borrow_and_move(e);
         return;
     case E_CALL_FUNC:
     case E_CALL_CTOR:
+        for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
+        check_borrow_and_move(e);
+        return;
     case E_CALL_PRINT:
     case E_ARRAY_INIT:
         for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);

@@ -1,4 +1,4 @@
-// An interface-typed parameter is a non-owning reference: changes made through
+// An interface parameter (I*) is a non-owning reference: changes made through
 // it are visible to the caller, whether the struct is a local, a field or an
 // array element (§5.3).
 
@@ -23,7 +23,7 @@ struct Panel {
     Clicker clicker;
 }
 
-void incrementThrice(Counter counter) {
+void incrementThrice(Counter* counter) {
     counter.increment();
     counter.increment();
     counter.increment();

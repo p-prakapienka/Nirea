@@ -12,15 +12,15 @@ struct Wallet {
         return coins * 2;
     }
 
-    boolean richerThan(Wallet other) {
+    boolean richerThan(Wallet* other) {
         return coins > other.coins;
     }
 
-    int doubledTotal(Wallet other) {
+    int doubledTotal(Wallet* other) {
         return doubled() + other.doubled();
     }
 
-    void takeAll(Wallet other) {
+    void takeAll(Wallet* other) {
         coins += other.coins;
         other.coins = 0;
     }

@@ -13,7 +13,7 @@ Square makeBlueSquare(int side) {
     return square;
 }
 
-void describeSquare(Square square) {
+void describeSquare(Square* square) {
     print(square.side);
     print(" ");
     println(square.color);

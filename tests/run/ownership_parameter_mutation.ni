@@ -1,4 +1,4 @@
-// Struct parameters and this are non-owning references: the function can
+// Reference parameters (T*) and this are non-owning references: the function can
 // write fields and call methods, and the caller sees the changes (§7.3).
 
 struct Engine {
@@ -14,13 +14,13 @@ struct Vehicle {
     int wheels;
 }
 
-void upgrade(Vehicle vehicle) {
+void upgrade(Vehicle* vehicle) {
     vehicle.wheels = 4;
     vehicle.engine.power += 50;
     vehicle.engine.boost(1);
 }
 
-void tune(Engine engine) {
+void tune(Engine* engine) {
     engine.power *= 2;
 }
 

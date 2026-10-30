@@ -17,7 +17,7 @@ struct Vehicle {
     Engine engine;
 }
 
-void process(Vehicle vehicle) {
+void process(Vehicle* vehicle) {
     alias engine = vehicle.engine;
     alias power = engine.getPower();
 

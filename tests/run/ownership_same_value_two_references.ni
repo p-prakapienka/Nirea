@@ -4,7 +4,7 @@ struct Counter {
     int value;
 }
 
-void addFrom(Counter target, Counter source) {
+void addFrom(Counter* target, Counter* source) {
     target.value = target.value + source.value;
 }
 

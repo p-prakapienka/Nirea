@@ -1,6 +1,6 @@
-// A function can't assign to an array parameter as a whole (§7.3).
+// A function can't assign to an array reference parameter as a whole (§7.3).
 
-void clear(int[3] values) {
+void clear(int[3]* values) {
     int[3] empty;
     values = empty; // error
 }
