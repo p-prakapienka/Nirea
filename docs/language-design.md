@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.3 — Semantics for the first compiler
+**Version:** 0.4 — Value and reference parameters
 **Status:** Preliminary Specification
 
-Version 0.3 resolves the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` takes ownership of its argument, `Engine* engine` borrows it. Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -173,10 +173,10 @@ Design rules:
 
 A struct implements an interface only by listing it after `:`. It must then declare a public method with the same name, parameter types and return type for every method of the interface. Having matching methods without listing the interface doesn't implement it.
 
-Interface types can be used only as parameter types. An interface-typed parameter is a non-owning reference to a struct value that implements the interface, and calls through it use dynamic dispatch. Any struct that implements the interface can be passed for it, and an interface-typed parameter can itself be passed on to another parameter of the same interface type.
+Interface types can be used only as reference parameter types, written `Drawable*` (§7.3). An interface parameter is a non-owning reference to a struct value that implements the interface, and calls through it use dynamic dispatch. Any struct that implements the interface can be passed for it, and an interface-typed parameter can itself be passed on to another parameter of the same interface type.
 
 ```nirea
-void render(Drawable shape) {
+void render(Drawable* shape) {
     shape.draw();
 }
 
@@ -338,7 +338,7 @@ grid[1][2] = 7;
 - `a.length` is the number of elements, as an `int`.
 - `T[A][B]` is an array of `A` elements of type `T[B]`.
 - Arrays are owned values, like structs: assignment moves them and `copy()` copies them (§7).
-- Arrays can be local variables, fields, parameters (passed by reference, §7.3) and return values.
+- Arrays can be local variables, fields, parameters (by value or by reference, §7.3) and return values. A reference to an array is written after its size: `int[4]* values`.
 
 ### 6.7 Enums
 
@@ -388,9 +388,10 @@ Ownership moves when a local variable is used as:
 - the initialiser of a variable declaration: `Engine second = first;`
 - the right-hand side of an assignment to a variable, field or array element: `vehicle.engine = first;`
 - the value of a `return` statement: `return first;`
+- an argument for a value parameter (§7.3): `install(first);`
 - an element of an array initialiser, or the value of a switch-expression arm (§10.1) used in one of these positions.
 
-Only a whole local variable can be moved. An object owned by another object, or borrowed by a function, can't change owner: fields, array elements, parameters, `this` and aliases can't be moved out of. To get an independent value from one of them, call `copy()`:
+Only a whole local variable can be moved, and value parameters count as local variables. An object owned by another object, or borrowed by a function, can't change owner: fields, array elements, reference parameters, `this` and aliases can't be moved out of. To get an independent value from one of them, call `copy()`:
 
 ```nirea
 Engine spare = vehicle.engine;          // error: can't move out of a field
@@ -422,12 +423,35 @@ Engine second = first.copy();
 
 `copy()` is built in for every struct and array type, and makes a deep copy: owned fields and elements are copied too. A struct can't declare its own method named `copy`; type-defined copying is an open question (§18).
 
-### 7.3 Non-owning references
+### 7.3 Passing values and references
 
-Functions can access objects without taking ownership.
+A struct or array parameter is either a value or a reference.
+
+A **value parameter**, written `Engine engine`, owns its argument. Passing a local variable gives the function ownership, and the caller can't use the variable afterwards. Inside the function, a value parameter is an owned local variable: it can be modified, assigned, returned, stored in a field or passed on by value. Changes to it aren't visible to the caller.
 
 ```nirea
-void inspect(Engine engine) {
+struct Vehicle {
+    Engine engine;
+
+    void setEngine(Engine engine) {
+        this.engine = engine;      // ownership moves into the field
+    }
+}
+
+void main() {
+    Engine engine = createEngine();
+    Vehicle vehicle;
+    vehicle.setEngine(engine);     // engine now belongs to setEngine
+    // engine is no longer accessible.
+}
+```
+
+Only a value that a function owns as a local variable can be passed by value. A value owned by another object, such as a field or an array element, can't be passed by value, and neither can a reference parameter, `this` or an alias. To pass one of them, the caller passes a copy: `vehicle.setEngine(spare.engine.copy());`. A call result, such as `createEngine()`, can be passed by value directly.
+
+A **reference parameter**, written with `*` after the type, borrows its argument without taking ownership. The call site looks the same as for a value: `inspect(engine)`.
+
+```nirea
+void inspect(Engine* engine) {
     println(engine.getPower());
 }
 
@@ -440,25 +464,21 @@ void main() {
 }
 ```
 
-Functions never take ownership of their arguments. Parameters of struct and array types are non-owning references to the caller's value. The function can read and write fields and elements and call methods, and the caller sees the changes. Parameters of primitive types, enums and `String` are passed by value. The method receiver `this` is a non-owning reference in the same way.
-
-The same value can be passed to several reference parameters of one call, as in `swapPower(engine, engine)`. Parameters of primitive types, enums and `String` are local copies, and the function can assign to them.
-
-A function can't move a parameter, or assign to a struct or array parameter as a whole. To keep a value it receives, it stores a copy:
+Through a reference, a function can read and write fields and elements and call methods, and the caller sees the changes. It can't move the referenced value or assign to it as a whole: the original owner keeps it. To keep the value, the function stores a copy:
 
 ```nirea
-struct Vehicle {
-    Engine engine;
-
-    void setEngine(Engine engine) {
-        this.engine = engine.copy();
-    }
+void setEngine(Engine* engine) {
+    this.engine = engine.copy();
 }
 ```
 
-Ownership leaves a function only through its return value. An argument that is a call result, such as `inspect(createEngine())`, is owned by the calling statement and lives until that statement ends.
+`T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the value it refers to. Only struct, array and interface types can be passed by reference. Interface parameters must be references (§5.3).
 
-Because calls never transfer ownership, transfer never has to be marked at a call site. There is no `borrow` keyword, and no `move` keyword.
+The same value can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. A local can't be both passed by value and borrowed in the same call. Parameters of primitive types, enums and `String` are always passed by value. They are local copies, and the function can assign to them.
+
+The method receiver `this` is a reference to the value the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
+
+Ownership transfer is never marked at a call site: there is no `borrow` keyword and no `move` keyword. The parameter declaration decides. Moving a local into a value parameter follows the same rules as assignment (§7.1).
 
 References must not outlive their referenced objects. References exist only as parameters, `this` and aliases (§9), none of which can outlive the value they refer to.
 
@@ -537,7 +557,7 @@ Nirea supports compile-time aliases for expressions.
 Aliases shorten repetitive access chains without creating additional variables or runtime objects.
 
 ```nirea
-void process(Vehicle vehicle) {
+void process(Vehicle* vehicle) {
     alias engine = vehicle.engine;
     alias power = engine.getPower();
 
@@ -960,24 +980,24 @@ The goal is not to maximise language features, but to make a small set of featur
 
 The following decisions require further specification.
 
-| Area        | Question                                                                      |
-| ----------- | ----------------------------------------------------------------------------- |
-| References  | Whether read-only references are needed once types can own heap resources     |
-| Lifetimes   | How references stored inside structs would be checked, if they are allowed    |
-| Copying     | Type-defined copy behaviour                                                   |
-| Destruction | Destructor syntax and execution order                                         |
-| Mutability  | How is object mutation distinguished from field replacement?                  |
-| Overloading | Whether functions, methods and constructors can be overloaded                 |
-| Generics    | Whether generics are included initially                                       |
-| Enums       | Variants with associated data                                                 |
-| Strings     | Owned, growable strings and text processing                                   |
-| Arrays      | Dynamically sized arrays and slices                                           |
-| FFI         | Struct, array, pointer and callback types at the C boundary                   |
-| Modules     | Per-file private declarations, and reopening a namespace in several places    |
-| ABI         | Native calling conventions and data layouts                                   |
-| Errors      | Recoverable error handling                                                    |
-| Concurrency | Ownership and thread-safety rules                                             |
-| Interfaces  | Owned interface values (variables, fields, return values) and static dispatch |
+| Area        | Question                                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| References  | Whether read-only references are needed once types can own heap resources, and whether primitive values can be passed by reference (`int*`) |
+| Lifetimes   | How references stored inside structs would be checked, if they are allowed                                                                  |
+| Copying     | Type-defined copy behaviour                                                                                                                 |
+| Destruction | Destructor syntax and execution order                                                                                                       |
+| Mutability  | How is object mutation distinguished from field replacement?                                                                                |
+| Overloading | Whether functions, methods and constructors can be overloaded                                                                               |
+| Generics    | Whether generics are included initially                                                                                                     |
+| Enums       | Variants with associated data                                                                                                               |
+| Strings     | Owned, growable strings and text processing                                                                                                 |
+| Arrays      | Dynamically sized arrays and slices                                                                                                         |
+| FFI         | Struct, array, pointer and callback types at the C boundary                                                                                 |
+| Modules     | Per-file private declarations, and reopening a namespace in several places                                                                  |
+| ABI         | Native calling conventions and data layouts                                                                                                 |
+| Errors      | Recoverable error handling                                                                                                                  |
+| Concurrency | Ownership and thread-safety rules                                                                                                           |
+| Interfaces  | Owned interface values (variables, fields, return values) and static dispatch                                                               |
 
 ## 19. Development roadmap
 
@@ -1043,7 +1063,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.3. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.4. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
@@ -1055,7 +1075,7 @@ decl           = functionDecl | structDecl | interfaceDecl | enumDecl
 
 functionDecl   = returnType IDENT "(" [ params ] ")" block ;
 params         = param { "," param } ;
-param          = type IDENT ;
+param          = type [ "*" ] IDENT ;                    (* "*": reference *)
 returnType     = "void" | type ;
 
 structDecl     = "struct" IDENT [ ":" typeName { "," typeName } ] "{" { member } "}" ;
@@ -1068,7 +1088,8 @@ constDecl      = "const" type IDENT "=" constValue ";" ;
 constValue     = [ "-" ] literal | typeName "." IDENT ;
 externBlock    = "extern" STRING "{" { externFunction } "}" ;
 externFunction = returnType IDENT "(" [ externParams ] ")" ";" ;
-externParams   = "..." | param { "," param } [ "," "..." ] ;
+externParams   = "..." | externParam { "," externParam } [ "," "..." ] ;
+externParam    = type IDENT ;
 
 type           = baseType { "[" arraySize "]" } ;
 baseType       = primitiveType | "String" | typeName ;

@@ -8,7 +8,7 @@ Nirea is a statically typed, memory-safe, native programming language. Its synta
 
 ## Current state
 
-The project is in **Phase 2: Initial compiler** (spec §19). The compiler implements the language as specified in version 0.3 of the spec.
+The project is in **Phase 2: Initial compiler** (spec §19). The compiler implements the language as specified in version 0.4 of the spec.
 
 ```text
 AGENTS.md                  this file
@@ -16,7 +16,7 @@ README.md                  project overview and usage
 CMakeLists.txt             build for the compiler and tests
 cmake/embed.cmake          embeds the runtime sources into the compiler
 docs/
-└── language-design.md     language design specification (v0.3, preliminary)
+└── language-design.md     language design specification (v0.4, preliminary)
 runtime/
 ├── nirea_rt.h             runtime header included by generated C
 └── nirea_rt.c             runtime: printing, runtime errors
