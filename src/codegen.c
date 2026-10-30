@@ -802,6 +802,11 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
         if (strchr(base, '[') || strchr(base, '(')) emit(cg, "(void)%s;", base);
         return fmt_str("%lld", (long long)e->base->type->length);
     }
+    case E_EQUALS: {
+        const char *a = gen_lvalue(cg, e->base);
+        const char *b = gen_lvalue(cg, e->args.data[0]);
+        return eq_expr(e->base->type, a, b);
+    }
     case E_COPY: {
         const char *p = gen_lvalue(cg, e->base);
         const char *t = new_tmp(cg);

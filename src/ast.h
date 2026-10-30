@@ -142,6 +142,7 @@ typedef enum ExprKind {
     E_CALL_PRINT,  /* print/println */
     E_CALL_STRING, /* built-in String method (base = receiver) or String.of (no base) */
     E_COPY,        /* base.copy() */
+    E_EQUALS,      /* base.equals(arg): structural comparison in place */
     E_LENGTH,      /* base.length */
     E_CONVERT,     /* implicit conversion of operand to type */
     E_TO_IFACE,    /* struct value passed as an interface reference */

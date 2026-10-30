@@ -29,6 +29,7 @@ typedef struct Ctx {
 static const char *name_print;
 static const char *name_println;
 static const char *name_copy;
+static const char *name_equals;
 static const char *name_length;
 static const char *name_main;
 static const char *name_string;
@@ -381,8 +382,8 @@ static void collect_decl(Program *prog, Decl *d) {
                 vec_push(prog->all_functions, m);
                 continue;
             }
-            if (m->name == name_copy && m->kind == D_METHOD) {
-                error_at(m->loc, "'copy' is built in for every struct and can't be declared as a method");
+            if ((m->name == name_copy || m->name == name_equals) && m->kind == D_METHOD) {
+                error_at(m->loc, "'%s' is built in for every struct and can't be declared as a method", m->name);
                 continue;
             }
             if (m->kind == D_FIELD) m->field_index = field_index++;
@@ -1135,6 +1136,20 @@ static Type *call_method_on(Ctx *ctx, Expr *e, Expr *receiver, const char *name,
         if (e->args.len) error_at(e->loc, "copy() takes no arguments");
         return set_type(e, rt);
     }
+    if (name == name_equals && type_is_owned(rt)) {
+        /* compares the values both sides refer to, in place (spec 6.9) */
+        e->kind = E_EQUALS;
+        e->base = receiver;
+        if (e->args.len != 1) error_at(e->loc, "equals() expects one argument");
+        for (int i = 0; i < e->args.len; i++) {
+            Type *at = check_value(ctx, e->args.data[i], rt);
+            if (i == 0 && !is_error(at) && at != rt) {
+                error_at(e->args.data[i]->loc, "equals() compares two values of the same type: expected %s, found %s",
+                         type_name(rt), type_name(at));
+            }
+        }
+        return set_type(e, type_bool);
+    }
     if (rt->kind == TY_STRING) return check_string_method(ctx, e, receiver, name, loc);
     if (rt->kind == TY_STRUCT) {
         Decl *m = map_get(&rt->decl->member_map, name);
@@ -1340,8 +1355,8 @@ static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
             Expr *operand = side ? e->index : e->base;
             if (is_reference(operand)) {
                 error_at(operand->loc,
-                         "%s is a reference and can't be compared with '%s'; use 'is' to check whether two references "
-                         "point to the same object, or compare their fields",
+                         "%s is a reference, and references can't be compared with '%s': use 'a is b' to check whether "
+                         "they point to the same object, or 'a.equals(b)' to compare their values",
                          reference_name(operand), opname);
                 return set_type(e, type_bool);
             }
@@ -2043,7 +2058,8 @@ static void check_stmt(Ctx *ctx, Stmt *s) {
             return;
         }
         if (e->kind != E_CALL_FUNC && e->kind != E_CALL_METHOD && e->kind != E_CALL_IFACE && e->kind != E_CALL_CTOR &&
-            e->kind != E_CALL_PRINT && e->kind != E_CALL_STRING && e->kind != E_COPY && !is_error(e->type)) {
+            e->kind != E_CALL_PRINT && e->kind != E_CALL_STRING && e->kind != E_COPY && e->kind != E_EQUALS &&
+            !is_error(e->type)) {
             error_at(e->loc, "this expression isn't a statement; only calls can be used as statements");
         }
         return;
@@ -2195,6 +2211,7 @@ void sema_check_program(Program *prog) {
     name_print = intern_cstr("print");
     name_println = intern_cstr("println");
     name_copy = intern_cstr("copy");
+    name_equals = intern_cstr("equals");
     name_length = intern_cstr("length");
     name_main = intern_cstr("main");
     name_string = intern_cstr("String");

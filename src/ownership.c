@@ -96,6 +96,7 @@ static void check_still_owned(OCtx *c, Var *v, State *before, State *after, Loc 
 }
 
 static Var *call_reference_root(Expr *call, int i) {
+    if (call->kind == E_EQUALS) return root_var(call->args.data[i]);
     if (call->kind == E_CALL_STRING) {
         /* String arguments of built-in methods are references */
         Expr *arg = call->args.data[i];
@@ -221,8 +222,10 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_CALL_IFACE:
     case E_CALL_FUNC:
     case E_CALL_CTOR:
-    case E_CALL_STRING: {
-        bool has_receiver = e->kind == E_CALL_METHOD || e->kind == E_CALL_IFACE || (e->kind == E_CALL_STRING && e->base);
+    case E_CALL_STRING:
+    case E_EQUALS: {
+        bool has_receiver = e->kind == E_CALL_METHOD || e->kind == E_CALL_IFACE || e->kind == E_EQUALS ||
+                            (e->kind == E_CALL_STRING && e->base);
         if (has_receiver) visit_expr(c, e->base, s);
         State after_receiver = state_copy(c, s);
         /* Each referenced argument must still own its object once all
