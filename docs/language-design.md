@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.10 — Reference variables and reference returns
+**Version:** 0.11 — Local variables are assigned before use
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Version 0.11 requires local variables to be assigned before they are used, and adds `T[N]()` to create zero-filled arrays (§6.6, §6.8). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -181,7 +181,7 @@ void render(Drawable* shape) {
 }
 
 void main() {
-    Circle circle;
+    Circle circle = Circle();
     circle.radius = 2.0;
     render(circle);
 }
@@ -211,7 +211,7 @@ void main() {
 
 All fields hold their zero value (§6.8) before the constructor body runs, so no field is ever read uninitialised. A constructor can set private fields.
 
-A struct that declares no constructor can be created with `T()`, which produces a zero-initialised value. A declaration without an initialiser, such as `Vec2 v;`, is equivalent. For a struct that declares a constructor, `T(...)` always calls that constructor, and a declaration without an initialiser is an error. The exception is storage owned by another value: fields and array elements of that struct type start at their zero value (§6.8).
+A struct that declares no constructor can be created with `T()`, which produces a zero-initialised value. For a struct that declares a constructor, `T(...)` always calls that constructor. A local variable is never created implicitly: `Vec2 v;` only declares `v`, which must be assigned before it is used (§6.8). Storage owned by another value is the exception: fields and array elements of a struct type start at their zero value, even when the struct declares a constructor (§6.8).
 
 ### 5.5 Constants
 
@@ -373,16 +373,17 @@ Strings can be compared with `==` (§6.9), printed (§15) and passed to C functi
 An array type `T[N]` holds exactly `N` elements of type `T`, stored inline. `N` is an integer literal or integer constant greater than zero.
 
 ```nirea
-int[4] values;                                     // all elements are 0
+int[4] values = int[4]();                          // all elements are 0
 int[3] primes = {2, 3, 5};
 Vec2[2] corners = {Vec2(0.0, 0.0), Vec2(1.0, 1.0)};
-int[2][3] grid;                                    // 2 rows of 3 ints
+int[2][3] grid = int[2][3]();                      // 2 rows of 3 ints, all 0
 
 values[0] = 10;
 int count = values.length;                         // 4
 grid[1][2] = 7;
 ```
 
+- `T[N]()` creates an array whose elements all hold their zero value (§6.8), even when `T` is a struct that declares a constructor.
 - An array initialiser `{...}` lists exactly `N` elements. It can be used only to initialise a variable declaration.
 - `a[i]` accesses an element. The index can have any integer type. An index outside `0` to `N - 1` is a runtime error.
 - `a.length` is the number of elements, as an `int`.
@@ -404,11 +405,22 @@ enum State {
 
 Enum values are written qualified with the enum name, such as `State.IDLE`, except in the `case` labels of a switch on that enum (§10.1). Enums support `==` and `!=`. They aren't owned, so they're copied like primitive values. Printing an enum value prints its name.
 
-### 6.8 Zero values
+### 6.8 Zero values and initialisation
 
 Every type has a zero value: `0` for numbers, `false` for `boolean`, `'\0'` for `char`, `""` for `String`, the first value for an enum, all fields zero for a struct and all elements zero for an array.
 
-A local variable declared without an initialiser holds its type's zero value, except for struct types that declare a constructor (§5.4). Struct fields and array elements always start at their zero value, even when their struct type declares a constructor. No value can be read uninitialised.
+Fields and array elements start at their zero value: a struct's fields when it is created with `T()` or before its constructor body runs (§5.4), and an array's elements when it is created with `T[N]()` (§6.6).
+
+Local variables have no zero value. A local variable declared without an initialiser, such as `Circle circle;`, is only declared: it has no value until one is assigned to it as a whole, and using it before then is a compile error. Declaration and assignment can be split:
+
+```nirea
+Circle circle;                 // declared, no value yet
+circle.radius = 2.0;           // error: circle has no value yet
+circle = Circle();
+circle.radius = 2.0;           // ok
+```
+
+This applies to every type, including numbers: `int count; count++;` is an error. Reading a variable, assigning to its fields or elements, calling a method on it, passing it to a function, `++`, `--` and compound assignments such as `+=` all use it. As with ownership transfers (§7.1), the compiler follows assignments through all control flow: a variable must have been assigned on every path that reaches a use. No value can be read uninitialised.
 
 ### 6.9 Equality
 
@@ -514,7 +526,7 @@ struct Vehicle {
 
 void main() {
     Engine engine = createEngine();
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.setEngine(engine);     // setEngine receives a copy
     println(engine.getPower());    // engine is still usable
 }
@@ -861,7 +873,7 @@ Usage:
 void main() {
     Audio.play();
 
-    Audio.AudioEngine engine;
+    Audio.AudioEngine engine = Audio.AudioEngine();
     engine.initialise();
 }
 ```
@@ -1233,7 +1245,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.10. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.11. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
@@ -1303,9 +1315,10 @@ unaryExpr      = ( "-" | "!" | "~" ) unaryExpr
 postfixExpr    = primary { "." IDENT | "[" expr "]" | "(" [ args ] ")" } ;
 args           = expr { "," expr } ;
 primary        = literal | IDENT | "this" | "(" expr ")" | switchExpr
-               | "String" "." IDENT ;                                   (* String.of *)
+               | "String" "." IDENT                                     (* String.of *)
+               | baseType "[" arraySize "]" { "[" arraySize "]" } "(" ")" ;   (* new array *)
 switchExpr     = "switch" "(" expr ")" "{" { switchLabel "->" expr ";" } "}" ;
 literal        = INTEGER | FLOAT | CHARACTER | STRING | "true" | "false" ;
 ```
 
-`IMPORT_PATH` is the text between `import` and `;`, with surrounding whitespace removed. A statement that starts with `switch` is a switch statement. A statement that starts with a type followed by an identifier, or by `*`, an identifier and `=`, is a variable declaration.
+`IMPORT_PATH` is the text between `import` and `;`, with surrounding whitespace removed. A statement that starts with `switch` is a switch statement. A statement that starts with a type followed by an identifier, or by `*`, an identifier and `=`, is a variable declaration. In an expression, `Name[N]()` creates an array when `Name` is a type; when it is a variable, `Name[N]` is an element.
