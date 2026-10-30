@@ -14,7 +14,7 @@ struct Vehicle {
         return engine;
     }
 
-    Engine* spare(int index) {
+    Engine* getSpare(int index) {
         Engine* chosen = spares[index];
         return chosen;
     }
@@ -34,7 +34,7 @@ Engine* stronger(Engine* a, Engine* b) {
 void main() {
     Vehicle vehicle;
     vehicle.getEngine().power = 90;
-    vehicle.spare(2).power = 30;
+    vehicle.getSpare(2).power = 30;
     vehicle.getName().append("car");
     println(vehicle.engine.power);            // expect: 90
     println(vehicle.spares[2].power);         // expect: 30

@@ -4,13 +4,13 @@
 struct Engine {
     int power;
 
-    Engine* self() {
+    Engine* getSelf() {
         return this;
     }
 }
 
 void main() {
     Engine* made = Engine(); // error: must refer to an existing object
-    Engine* chained = Engine().self(); // error: must refer to an existing object
+    Engine* chained = Engine().getSelf(); // error: must refer to an existing object
     String* text = "abc"; // error: must refer to an existing object
 }

@@ -179,7 +179,7 @@ struct Builder {
 struct Garden {
     Rectangle[3] beds;
 
-    Rectangle* bed(int index) {              // returns a reference into this garden
+    Rectangle* getBed(int index) {           // returns a reference into this garden
         return beds[index];
     }
 }
@@ -192,8 +192,8 @@ void main() {
     println(rectangle.width * rectangle.height);   // 12
 
     Garden garden = Garden();
-    garden.bed(0).width = 5;                 // changes the first bed inside garden
-    Rectangle* second = garden.bed(1);       // a reference to the second bed
+    garden.getBed(0).width = 5;              // changes the first bed inside garden
+    Rectangle* second = garden.getBed(1);    // a reference to the second bed
     second.width = 2;
     second.height = 6;
     println(garden.beds[0].width);           // 5

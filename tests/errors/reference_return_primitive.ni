@@ -4,7 +4,7 @@
 struct Counter {
     int value;
 
-    int* get() { // error: only struct, array, String and interface types have references
+    int* getValue() { // error: only struct, array, String and interface types have references
         return value;
     }
 }
