@@ -12,6 +12,7 @@ The project is in **Phase 1: Language definition** (spec §19). There is no comp
 
 ```text
 AGENTS.md                  this file
+README.md                  project overview
 docs/
 └── language-design.md     language design specification (v0.2, preliminary)
 ```
