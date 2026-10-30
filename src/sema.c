@@ -1061,7 +1061,7 @@ static Type *call_decl(Ctx *ctx, Expr *e, Decl *d) {
 }
 
 /* Built-in String methods (spec 6.5). Parameter kinds: 'i' int, 'c' char,
- * 's' String reference. */
+ * 's' String reference, 'v' String value. */
 typedef struct StringMethod {
     const char *name;
     const char *params;
@@ -1070,7 +1070,7 @@ typedef struct StringMethod {
 
 static const StringMethod string_methods[] = {
     {"length", "", &type_i32},       {"charAt", "i", &type_char},       {"setCharAt", "ic", &type_void},
-    {"append", "s", &type_void},     {"appendChar", "c", &type_void},   {"substring", "ii", &type_string},
+    {"append", "v", &type_void},     {"appendChar", "c", &type_void},   {"substring", "ii", &type_string},
     {"indexOf", "s", &type_i32},     {"toInt", "", &type_i32},          {"toInt64", "", &type_i64},
     {"toFloat64", "", &type_f64},
 };
@@ -1089,7 +1089,7 @@ static void check_string_args(Ctx *ctx, Expr *e, const char *params, const char 
         const char *what = fmt_str("argument %d of %s", i + 1, desc);
         Type *pt = params[i] == 'i' ? type_i32 : params[i] == 'c' ? type_char : type_string;
         Type *at = check_value(ctx, e->args.data[i], pt);
-        if (params[i] == 's') {
+        if (params[i] == 's' || params[i] == 'v') {
             if (!is_error(at) && at != type_string) error_at(e->args.data[i]->loc, "%s: expected String, found %s", what, type_name(at));
         } else {
             coerce(&e->args.data[i], pt, what);

@@ -502,6 +502,9 @@ static const char *gen_string_call(CG *cg, Expr *e, bool want_value) {
     StrBuf args = {0};
     for (int i = 0; i < e->args.len; i++) {
         Expr *arg = e->args.data[i];
+        /* String arguments are passed by address. append's parameter is a
+         * value (spec 6.5), but append only reads it, so using the original
+         * in place behaves the same as a copy; the runtime handles s.append(s). */
         if (arg->type == type_string) sb_printf(&args, ", %s", gen_ref(cg, arg));
         else if (type_is_integer(arg->type)) sb_printf(&args, ", (int64_t)%s", gen_expr(cg, arg));
         else sb_printf(&args, ", %s", gen_expr(cg, arg));
