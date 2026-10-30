@@ -18,15 +18,14 @@ static const struct {
     const char *word;
     TokenKind kind;
 } keywords[] = {
-    {"alias", TOK_ALIAS},         {"boolean", TOK_BOOLEAN},     {"break", TOK_BREAK},
-    {"case", TOK_CASE},           {"char", TOK_CHAR_KW},        {"const", TOK_CONST},
-    {"continue", TOK_CONTINUE},   {"default", TOK_DEFAULT},     {"do", TOK_DO},
-    {"else", TOK_ELSE},           {"enum", TOK_ENUM},           {"extern", TOK_EXTERN},
-    {"false", TOK_FALSE},         {"float", TOK_FLOAT_KW},      {"float64", TOK_FLOAT64},
-    {"for", TOK_FOR},             {"if", TOK_IF},               {"import", TOK_IMPORT},
-    {"int", TOK_INT_KW},          {"int8", TOK_INT8},           {"int16", TOK_INT16},
-    {"int64", TOK_INT64},         {"interface", TOK_INTERFACE}, {"is", TOK_IS},
-    {"namespace", TOK_NAMESPACE},
+    {"boolean", TOK_BOOLEAN},     {"break", TOK_BREAK},         {"case", TOK_CASE},
+    {"char", TOK_CHAR_KW},        {"const", TOK_CONST},         {"continue", TOK_CONTINUE},
+    {"default", TOK_DEFAULT},     {"do", TOK_DO},               {"else", TOK_ELSE},
+    {"enum", TOK_ENUM},           {"extern", TOK_EXTERN},       {"false", TOK_FALSE},
+    {"float", TOK_FLOAT_KW},      {"float64", TOK_FLOAT64},     {"for", TOK_FOR},
+    {"if", TOK_IF},               {"import", TOK_IMPORT},       {"int", TOK_INT_KW},
+    {"int8", TOK_INT8},           {"int16", TOK_INT16},         {"int64", TOK_INT64},
+    {"interface", TOK_INTERFACE}, {"namespace", TOK_NAMESPACE},
     {"private", TOK_PRIVATE},     {"return", TOK_RETURN},       {"String", TOK_STRING_KW},
     {"struct", TOK_STRUCT},       {"switch", TOK_SWITCH},       {"this", TOK_THIS},
     {"true", TOK_TRUE},           {"uint", TOK_UINT},           {"uint8", TOK_UINT8},
@@ -90,7 +89,7 @@ static const char *kind_names[TOK_COUNT] = {
 };
 
 const char *token_kind_name(TokenKind kind) {
-    if (kind >= TOK_ALIAS && kind <= TOK_WHILE) {
+    if (kind >= TOK_BOOLEAN && kind <= TOK_WHILE) {
         for (size_t i = 0; i < sizeof keywords / sizeof keywords[0]; i++) {
             if (keywords[i].kind == kind) return fmt_str("'%s'", keywords[i].word);
         }

@@ -1,4 +1,4 @@
-// Fields, reference parameters, array elements, this and aliases can't give their objects to a new owner,
+// Fields, reference parameters, array elements, this and reference variables can't give their objects to a new owner,
 // but copy() gives an independent value from each of them (§7.1, §7.2).
 
 struct Engine {
@@ -38,9 +38,9 @@ void main() {
     Engine fromThis = vehicle.engine.duplicate();
     println(fromThis.power);        // expect: 10
 
-    alias aliased = vehicle.engine;
-    Engine fromAlias = aliased.copy();
-    fromAlias.power = 12;
+    Engine* referenced = vehicle.engine;
+    Engine fromReference = referenced.copy();
+    fromReference.power = 12;
     println(vehicle.engine.power);  // expect: 10
 
     Vehicle other;

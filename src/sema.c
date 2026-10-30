@@ -10,7 +10,6 @@
 typedef struct ScopeEntry {
     const char *name;
     Var *var;
-    Alias *alias;
     int depth;
 } ScopeEntry;
 
@@ -173,14 +172,14 @@ static ScopeEntry *find_scope(Ctx *ctx, const char *name) {
     return NULL;
 }
 
-static bool declare_name(Ctx *ctx, const char *name, Loc loc, Var *var, Alias *alias) {
+static bool declare_name(Ctx *ctx, const char *name, Loc loc, Var *var) {
     ScopeEntry *prev = find_scope(ctx, name);
     if (prev) {
         error_at(loc, "'%s' is already declared in this function", name);
-        note_at(prev->var ? prev->var->loc : prev->alias->loc, "'%s' was declared here", name);
+        note_at(prev->var->loc, "'%s' was declared here", name);
         return false;
     }
-    ScopeEntry e = {name, var, alias, ctx->depth};
+    ScopeEntry e = {name, var, ctx->depth};
     vec_push(ctx->scope, e);
     return true;
 }
@@ -307,7 +306,7 @@ static Type *resolve_type(Ctx *ctx, TypeExpr *te, bool allow_interface, const ch
         t = d->type;
     }
     if (t->kind == TY_INTERFACE && (te->dims.len > 0 || !allow_interface)) {
-        error_at(te->loc, "interface types can only be used as parameter types");
+        error_at(te->loc, "interface types can only be used as references, written %s*", type_name(t));
         return type_error;
     }
     for (int i = te->dims.len - 1; i >= 0; i--) {
@@ -553,8 +552,18 @@ static void resolve_signature(Program *prog, Decl *fn) {
     } else if (fn->ret_expr->is_void) {
         fn->ret_type = type_void;
     } else {
-        fn->ret_type = resolve_type(&ctx, fn->ret_expr, false, "a return value");
-        if (fn->ret_type->kind == TY_INTERFACE) fn->ret_type = type_error;
+        fn->ret_type = resolve_type(&ctx, fn->ret_expr, fn->ret_is_ref, "a return value");
+        if (fn->ret_type->kind == TY_INTERFACE && !fn->ret_is_ref) fn->ret_type = type_error;
+        if (fn->ret_is_ref && !is_error(fn->ret_type) && !type_is_owned(fn->ret_type) &&
+            fn->ret_type->kind != TY_INTERFACE) {
+            error_at(fn->ret_expr->loc,
+                     "only struct, array, String and interface types have references; return %s by value instead",
+                     type_name(fn->ret_type));
+            fn->ret_type = type_error;
+        }
+    }
+    if (fn->ret_is_ref && fn->ret_expr->is_void) {
+        error_at(fn->ret_expr->loc, "void can't be returned by reference; remove the '*'");
     }
     if (is_extern && !is_error(fn->ret_type) &&
         !(fn->ret_type == type_void || type_is_numeric(fn->ret_type) || fn->ret_type == type_bool ||
@@ -572,7 +581,7 @@ static void resolve_signature(Program *prog, Decl *fn) {
         p->type = resolve_type(&ctx, p->type_expr, !is_extern, "a parameter");
         if (!is_error(p->type)) {
             if (p->is_ref && !type_is_owned(p->type) && p->type->kind != TY_INTERFACE) {
-                error_at(p->loc, "only struct, array and interface parameters can be references; %s is always passed by value",
+                error_at(p->loc, "only struct, array, String and interface parameters can be references; %s is always passed by value",
                          type_name(p->type));
             } else if (!p->is_ref && p->type->kind == TY_INTERFACE) {
                 error_at(p->loc, "interface parameters must be references: write %s* %s", type_name(p->type), p->name);
@@ -670,7 +679,7 @@ static void check_struct_cycles(Program *prog) {
 }
 
 static bool same_signature(Decl *a, Decl *b) {
-    if (a->ret_type != b->ret_type || a->params.len != b->params.len) return false;
+    if (a->ret_type != b->ret_type || a->ret_is_ref != b->ret_is_ref || a->params.len != b->params.len) return false;
     for (int i = 0; i < a->params.len; i++) {
         if (a->params.data[i]->type != b->params.data[i]->type) return false;
         if (a->params.data[i]->is_ref != b->params.data[i]->is_ref) return false;
@@ -712,6 +721,17 @@ static bool struct_implements(Decl *s, Decl *iface) {
     return false;
 }
 
+/* Wraps a struct value used as a reference to an interface it implements. */
+static void wrap_to_iface(Expr **pe, Type *iface) {
+    Expr *conv = NEW(Expr);
+    conv->kind = E_TO_IFACE;
+    conv->loc = (*pe)->loc;
+    conv->base = *pe;
+    conv->type = iface;
+    conv->iface_impl_struct = (*pe)->type->decl;
+    *pe = conv;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Expressions                                                             */
 
@@ -730,8 +750,8 @@ static void check_private(Ctx *ctx, Decl *member, Loc loc) {
     }
 }
 
-/* Resolves a bare name. The result may be a value (E_VAR, E_FIELD, E_CONST,
- * E_ALIAS) or a reference to a declaration (E_NAMESPACE_REF, E_TYPE_REF,
+/* Resolves a bare name. The result may be a value (E_VAR, E_FIELD, E_CONST)
+ * or a reference to a declaration (E_NAMESPACE_REF, E_TYPE_REF,
  * E_FUNC_REF). */
 static void resolve_name(Ctx *ctx, Expr *e) {
     if (e->name == name_string) {
@@ -744,15 +764,9 @@ static void resolve_name(Ctx *ctx, Expr *e) {
     }
     ScopeEntry *se = find_scope(ctx, e->name);
     if (se) {
-        if (se->var) {
-            e->kind = E_VAR;
-            e->var = se->var;
-            e->type = se->var->type;
-        } else {
-            e->kind = E_ALIAS;
-            e->alias = se->alias;
-            e->type = se->alias->expr->type;
-        }
+        e->kind = E_VAR;
+        e->var = se->var;
+        e->type = se->var->type;
         return;
     }
     if (ctx->self) {
@@ -967,13 +981,7 @@ static void check_args(Ctx *ctx, Expr *call, Decl *fn, const char *fn_desc) {
             Type *at = check_value(ctx, arg, NULL);
             if (is_error(at) || at == pt) continue;
             if (at->kind == TY_STRUCT && struct_implements(at->decl, pt->decl)) {
-                Expr *conv = NEW(Expr);
-                conv->kind = E_TO_IFACE;
-                conv->loc = arg->loc;
-                conv->base = arg;
-                conv->type = pt;
-                conv->iface_impl_struct = at->decl;
-                call->args.data[i] = conv;
+                wrap_to_iface(&call->args.data[i], pt);
             } else if (at->kind == TY_STRUCT) {
                 error_at(arg->loc, "%s: struct '%s' doesn't implement interface '%s'", what, type_name(at),
                          type_name(pt));
@@ -1194,7 +1202,7 @@ static Type *check_call(Ctx *ctx, Expr *e) {
         const char *name = callee->name;
         ScopeEntry *se = find_scope(ctx, name);
         if (se) {
-            error_at(callee->loc, "'%s' is a %s, not a function", name, se->var ? "variable" : "alias");
+            error_at(callee->loc, "'%s' is a variable, not a function", name);
             for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
             return set_type(e, type_error);
         }
@@ -1303,19 +1311,22 @@ static void check_operands(Ctx *ctx, Expr *e, Type *hint) {
     }
 }
 
-/* A reference is a T* parameter, `this`, or an alias of either (spec 6.9). */
+/* A reference is a T* parameter or variable, `this`, or the result of a call
+ * that returns a reference (spec 9). */
 static bool is_reference(Expr *e) {
     switch (e->kind) {
-    case E_VAR: return e->var->kind == VAR_PARAM && e->var->is_ref;
+    case E_VAR: return e->var->is_ref;
     case E_THIS: return true;
-    case E_ALIAS: return is_reference(e->alias->expr);
-    default: return false;
+    default: return is_ref_call(e);
     }
 }
 
 static const char *reference_name(Expr *e) {
-    while (e->kind == E_ALIAS) e = e->alias->expr;
-    return e->kind == E_THIS ? "this" : fmt_str("'%s'", e->var->name);
+    switch (e->kind) {
+    case E_THIS: return "this";
+    case E_VAR: return fmt_str("'%s'", e->var->name);
+    default: return fmt_str("the result of '%s'", e->decl->name);
+    }
 }
 
 static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
@@ -1331,21 +1342,6 @@ static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
         coerce(&e->index, type_bool, fmt_str("right operand of '%s'", opname));
         return set_type(e, type_bool);
     }
-    case TOK_IS: {
-        Type *lt = check_value(ctx, e->base, NULL);
-        Type *rt = check_value(ctx, e->index, NULL);
-        if (is_error(lt) || is_error(rt)) return set_type(e, type_bool);
-        for (int side = 0; side < 2; side++) {
-            Expr *operand = side ? e->index : e->base;
-            if (!is_reference(operand)) {
-                error_at(operand->loc,
-                         "'is' compares references (T* parameters or this), but this is a value; compare values with '=='");
-                return set_type(e, type_bool);
-            }
-        }
-        if (lt != rt) error_at(e->loc, "'is' needs two references of the same type, found %s and %s", type_name(lt), type_name(rt));
-        return set_type(e, type_bool);
-    }
     case TOK_EQ:
     case TOK_NE: {
         check_operands(ctx, e, NULL);
@@ -1355,8 +1351,8 @@ static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
             Expr *operand = side ? e->index : e->base;
             if (is_reference(operand)) {
                 error_at(operand->loc,
-                         "%s is a reference, and references can't be compared with '%s': use 'a is b' to check whether "
-                         "they point to the same object, or 'a.equals(b)' to compare their values",
+                         "%s is a reference, and references can't be compared with '%s'; use 'a.equals(b)' to compare "
+                         "the values they refer to",
                          reference_name(operand), opname);
                 return set_type(e, type_bool);
             }
@@ -1607,8 +1603,9 @@ static const char *place_description(Expr *e) {
     case E_FIELD: return "a field";
     case E_INDEX: return "an array element";
     case E_THIS: return "'this'";
-    case E_ALIAS: return "an alias";
-    case E_VAR: return e->var->kind == VAR_PARAM && e->var->is_ref ? "a reference parameter" : "a variable";
+    case E_VAR:
+        if (!e->var->is_ref) return "a variable";
+        return e->var->kind == VAR_PARAM ? "a reference parameter" : "a reference variable";
     default: return "the value of this expression";
     }
 }
@@ -1622,7 +1619,7 @@ static bool is_new_object(Expr *e) {
     switch (e->kind) {
     case E_CALL_FUNC:
     case E_CALL_METHOD:
-    case E_CALL_IFACE:
+    case E_CALL_IFACE: return !is_ref_call(e);
     case E_CALL_CTOR:
     case E_CALL_STRING:
     case E_COPY:
@@ -1655,12 +1652,12 @@ static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     }
     switch (e->kind) {
     case E_VAR:
-        if (e->var->kind == VAR_PARAM && e->var->is_ref) {
-            if (is_argument) {
-                error_at(e->loc, "'%s' refers to the caller's object and can't be passed by value; pass %s.copy()",
+        if (e->var->is_ref) {
+            if (e->var->kind == VAR_PARAM) {
+                error_at(e->loc, "'%s' refers to the caller's object, which stays with its owner; use %s.copy()",
                          e->var->name, e->var->name);
             } else {
-                error_at(e->loc, "'%s' refers to the caller's object, which stays with its owner; use %s.copy()",
+                error_at(e->loc, "'%s' is a reference, and its object stays with its owner; use %s.copy()",
                          e->var->name, e->var->name);
             }
             return;
@@ -1670,6 +1667,10 @@ static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     case E_CALL_FUNC:
     case E_CALL_METHOD:
     case E_CALL_IFACE:
+        if (is_ref_call(e)) {
+            error_at(e->loc, "'%s' returns a reference, and its object stays with its owner; use .copy()", e->decl->name);
+        }
+        return;
     case E_CALL_CTOR:
     case E_CALL_STRING:
     case E_COPY:
@@ -1680,15 +1681,6 @@ static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
         e->transfers_ownership = true; /* the result gets an owner (spec 10.1) */
         for (int i = 0; i < e->sw->arms.len; i++) {
             if (e->sw->arms.data[i].expr) check_transfer_source(ctx, e->sw->arms.data[i].expr, is_argument);
-        }
-        return;
-    case E_ALIAS:
-        if (is_argument) {
-            error_at(e->loc, "alias '%s' can't be passed by value; aliases never transfer ownership, so pass a copy",
-                     e->alias->name);
-        } else {
-            error_at(e->loc, "alias '%s' can't give its object to a new owner; aliases never transfer ownership, so use .copy()",
-                     e->alias->name);
         }
         return;
     default:
@@ -1709,8 +1701,7 @@ static bool assignable_base(Expr *e) {
     case E_THIS: return true;
     case E_FIELD:
     case E_INDEX: return assignable_base(e->base);
-    case E_ALIAS: return assignable_base(e->alias->expr);
-    default: return false;
+    default: return is_ref_call(e);
     }
 }
 
@@ -1718,9 +1709,15 @@ static bool check_assign_target(Ctx *ctx, Expr *target) {
     (void)ctx;
     if (is_error(target->type)) return false;
     Expr *t = target;
-    while (t->kind == E_ALIAS) t = t->alias->expr;
     switch (t->kind) {
     case E_VAR:
+        if (t->var->is_ref && t->var->kind == VAR_LOCAL) {
+            error_at(target->loc,
+                     "can't assign to reference '%s' as a whole; a reference is set when it is declared (%s)", t->var->name,
+                     t->var->type == type_string ? fmt_str("use %s.append(...) to add to its String", t->var->name)
+                                                 : "assign its fields instead");
+            return false;
+        }
         if (t->var->kind == VAR_PARAM && t->var->is_ref) {
             if (t->var->type == type_string) {
                 error_at(target->loc,
@@ -1746,8 +1743,131 @@ static bool check_assign_target(Ctx *ctx, Expr *target) {
         return true;
     case E_CONST: error_at(target->loc, "can't assign to constant '%s'", t->decl->name); return false;
     case E_LENGTH: error_at(target->loc, "an array's length can't be changed"); return false;
-    default: error_at(target->loc, "the left side of an assignment must be a variable, field or array element"); return false;
+    default:
+        if (is_ref_call(t)) {
+            error_at(target->loc, "can't assign to the result of '%s' as a whole; it refers to an existing object (assign "
+                                  "its fields instead)",
+                     t->decl->name);
+            return false;
+        }
+        error_at(target->loc, "the left side of an assignment must be a variable, field or array element");
+        return false;
     }
+}
+
+/* ---------------------------------------------------------------------- */
+/* References (spec 9)                                                     */
+
+/* The parameter that argument i of a call is passed to, if any. */
+static Var *call_param_of(Expr *call, int i) {
+    Decl *fn = call->decl;
+    if (call->kind == E_CALL_CTOR) fn = fn->ctor;
+    if (!fn || i >= fn->params.len) return NULL;
+    return fn->params.data[i];
+}
+
+/* True if every object a reference-returning call can refer to satisfies
+ * pred: the object it is called on and its reference arguments (spec 9.2). */
+static bool ref_call_sources_all(Expr *call, bool (*pred)(Expr *)) {
+    if (call->kind != E_CALL_FUNC && !pred(call->base)) return false;
+    for (int i = 0; i < call->args.len; i++) {
+        Var *p = call_param_of(call, i);
+        if (p && p->is_ref && !pred(call->args.data[i])) return false;
+    }
+    return true;
+}
+
+/* True if e names an existing object rather than a temporary one: a
+ * variable, parameter, `this`, a field or element of one, or the result of
+ * a call that returns a reference to such objects (spec 9.1). */
+static bool is_existing_object(Expr *e) {
+    switch (e->kind) {
+    case E_VAR:
+    case E_THIS: return true;
+    case E_FIELD:
+    case E_INDEX:
+    case E_TO_IFACE: return is_existing_object(e->base);
+    default: return is_ref_call(e) && ref_call_sources_all(e, is_existing_object);
+    }
+}
+
+/* True if the object e refers to outlives the function being checked: it is
+ * reached through `this`, a reference parameter, or a reference that is
+ * (spec 9.2). */
+static bool outlives_call(Expr *e) {
+    switch (e->kind) {
+    case E_THIS: return true;
+    case E_VAR: return e->var->is_ref && (e->var->kind == VAR_PARAM || e->var->ref_to_caller);
+    case E_FIELD:
+    case E_INDEX:
+    case E_TO_IFACE: return outlives_call(e->base);
+    default: return is_ref_call(e) && ref_call_sources_all(e, outlives_call);
+    }
+}
+
+/* Describes the local object a reference returned by e would refer to. */
+static const char *local_object_description(Expr *e) {
+    while (e->kind == E_FIELD || e->kind == E_INDEX || e->kind == E_TO_IFACE) e = e->base;
+    if (e->kind == E_VAR) {
+        Var *v = e->var;
+        if (v->is_ref) return fmt_str("'%s', which refers to an object of this function", v->name);
+        if (v->kind == VAR_PARAM) return fmt_str("value parameter '%s', which holds a copy", v->name);
+        return fmt_str("local variable '%s'", v->name);
+    }
+    return fmt_str("the result of '%s', which refers to an object of this function", e->decl->name);
+}
+
+/* Checks a value used as a reference of type t: the initialiser of a
+ * reference variable or the value returned by a function that returns a
+ * reference (spec 9.1, 9.2). A struct becomes a reference to an interface it
+ * implements. */
+static bool check_reference_value(Ctx *ctx, Expr **pe, Type *t, const char *what, const char *hint) {
+    Type *et = check_value(ctx, *pe, t);
+    if (is_error(et) || is_error(t)) return false;
+    if (et != t) {
+        if (t->kind == TY_INTERFACE && et->kind == TY_STRUCT && struct_implements(et->decl, t->decl)) {
+            wrap_to_iface(pe, t);
+        } else {
+            error_at((*pe)->loc, "%s: expected %s, found %s", what, type_name(t), type_name(et));
+            return false;
+        }
+    }
+    if ((*pe)->kind == E_SWITCH) {
+        error_at((*pe)->loc,
+                 "%s must name an existing object directly (a variable, parameter, this, a part of one, or a call that "
+                 "returns a reference), not choose one with a switch expression",
+                 what);
+        return false;
+    }
+    if (!is_existing_object(*pe)) {
+        error_at((*pe)->loc,
+                 "%s must refer to an existing object, but this is a temporary value, destroyed at the end of the "
+                 "statement%s",
+                 what, hint);
+        return false;
+    }
+    return true;
+}
+
+static void check_reference_decl(Ctx *ctx, Stmt *s) {
+    Var *v = s->var;
+    v->type = resolve_type(ctx, v->type_expr, true, "a variable");
+    if (!is_error(v->type) && !type_is_owned(v->type) && v->type->kind != TY_INTERFACE) {
+        error_at(v->loc, "only struct, array, String and interface types have references; %s is always a value, so "
+                         "declare '%s' without '*'",
+                 type_name(v->type), v->name);
+        v->type = type_error;
+    }
+    if (!s->init) {
+        error_at(v->loc, "reference '%s' must be initialised with the object it refers to: %s* %s = ...;", v->name,
+                 type_name(v->type), v->name);
+    } else if (s->init->kind == E_ARRAY_INIT) {
+        error_at(s->init->loc, "reference '%s' must refer to an existing object, not an array initialiser", v->name);
+    } else if (check_reference_value(ctx, &s->init, v->type, fmt_str("reference '%s'", v->name),
+                                     "; store the object in a variable and refer to that")) {
+        v->ref_to_caller = outlives_call(s->init);
+    }
+    if (declare_name(ctx, v->name, v->loc, v)) add_local(ctx, v);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -1767,7 +1887,7 @@ static void check_switch(Ctx *ctx, SwitchData *sw, Loc loc, bool is_expr, Expr *
             bad = true;
         }
         if (!bad && is_reference(sw->subject)) {
-            error_at(sw->subject->loc, "can't switch on reference %s; a switch compares its subject with values",
+            error_at(sw->subject->loc, "can't switch on %s: it is a reference, and a switch compares its subject with values",
                      reference_name(sw->subject));
             bad = true;
         }
@@ -2024,6 +2144,10 @@ static void check_initialiser(Ctx *ctx, Var *v, Expr **pinit) {
 
 static void check_var_decl(Ctx *ctx, Stmt *s) {
     Var *v = s->var;
+    if (v->is_ref) {
+        check_reference_decl(ctx, s);
+        return;
+    }
     v->type = resolve_type(ctx, v->type_expr, false, "a variable");
     if (s->init) {
         check_initialiser(ctx, v, &s->init);
@@ -2031,7 +2155,7 @@ static void check_var_decl(Ctx *ctx, Stmt *s) {
         error_at(v->loc, "struct '%s' has a constructor, so '%s' needs an initialiser, e.g. %s %s = %s(...)",
                  type_name(v->type), v->name, type_name(v->type), v->name, v->type->decl->name);
     }
-    if (declare_name(ctx, v->name, v->loc, v, NULL)) add_local(ctx, v);
+    if (declare_name(ctx, v->name, v->loc, v)) add_local(ctx, v);
 }
 
 static void check_assign(Ctx *ctx, Stmt *s) {
@@ -2096,13 +2220,6 @@ static void check_stmt(Ctx *ctx, Stmt *s) {
     switch (s->kind) {
     case S_BLOCK: check_block_scoped(ctx, s); return;
     case S_VAR: check_var_decl(ctx, s); return;
-    case S_ALIAS: {
-        Alias *a = s->alias;
-        Type *t = check_value(ctx, a->expr, NULL);
-        (void)t;
-        declare_name(ctx, a->name, a->loc, NULL, a);
-        return;
-    }
     case S_EXPR: {
         Expr *e = s->expr;
         Type *t = check_expr(ctx, e, NULL);
@@ -2174,6 +2291,15 @@ static void check_stmt(Ctx *ctx, Stmt *s) {
             check_expr(ctx, s->expr, NULL);
             error_at(s->expr->loc, "%s can't return a value",
                      ctx->fn->kind == D_CTOR ? "a constructor" : "a void function");
+            return;
+        }
+        if (ctx->fn->ret_is_ref) {
+            if (check_reference_value(ctx, &s->expr, rt, "the returned reference", "") && !outlives_call(s->expr)) {
+                error_at(s->expr->loc,
+                         "can't return a reference to %s: it is destroyed when the function returns; return this, a "
+                         "reference parameter or a part of one",
+                         local_object_description(s->expr));
+            }
             return;
         }
         Type *t = check_value(ctx, s->expr, rt);
@@ -2251,7 +2377,7 @@ static void check_function(Program *prog, Decl *fn) {
     push_scope(&ctx);
     for (int i = 0; i < fn->params.len; i++) {
         Var *p = fn->params.data[i];
-        declare_name(&ctx, p->name, p->loc, p, NULL);
+        declare_name(&ctx, p->name, p->loc, p);
         add_local(&ctx, p);
     }
     for (int i = 0; i < fn->body->stmts.len; i++) check_stmt(&ctx, fn->body->stmts.data[i]);
