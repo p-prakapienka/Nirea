@@ -3,7 +3,7 @@
 
 interface Shape {
     int area();
-    Shape* self();
+    Shape* getShape();
 }
 
 struct Square : Shape {
@@ -13,7 +13,7 @@ struct Square : Shape {
         return side * side;
     }
 
-    Shape* self() {
+    Shape* getShape() {
         return this;
     }
 }
@@ -31,6 +31,6 @@ void main() {
     Square big;
     big.side = 5;
     println(larger(small, big).area());       // expect: 25
-    Shape* shape = small.self();
-    println(shape.self().area());             // expect: 4
+    Shape* shape = small.getShape();
+    println(shape.getShape().area());             // expect: 4
 }
