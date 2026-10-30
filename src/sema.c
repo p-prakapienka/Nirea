@@ -1425,12 +1425,16 @@ static Type *check_binary(Ctx *ctx, Expr *e, Type *expected) {
         check_operands(ctx, e, hint);
         Type *lt = e->base->type, *rt = e->index->type;
         if (is_error(lt) || is_error(rt)) return set_type(e, type_error);
+        if (op == TOK_PLUS && (lt == type_string || rt == type_string)) {
+            /* concatenation creates a new String (spec 6.5) */
+            if (lt == type_string && rt == type_string) return set_type(e, type_string);
+            Expr *other = lt == type_string ? e->index : e->base;
+            error_at(other->loc, "'+' concatenates two strings, but this is %s; convert it with String.of(...)",
+                     type_name(other->type));
+            return set_type(e, type_error);
+        }
         if (!type_is_numeric(lt) || !type_is_numeric(rt)) {
-            if (op == TOK_PLUS && (lt == type_string || rt == type_string)) {
-                error_at(e->loc, "'+' doesn't concatenate strings; use append, e.g. text.append(other)");
-            } else {
-                error_at(e->loc, "'%s' needs numeric operands, found %s and %s", opname, type_name(lt), type_name(rt));
-            }
+            error_at(e->loc, "'%s' needs numeric operands, found %s and %s", opname, type_name(lt), type_name(rt));
             return set_type(e, type_error);
         }
         return set_type(e, common_numeric(e, lt, rt, opname));
@@ -1637,7 +1641,8 @@ static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
     case E_CALL_STRING:
     case E_COPY:
     case E_STRING:
-    case E_CONST: return; /* new objects */
+    case E_CONST:
+    case E_BINARY: return; /* new objects; E_BINARY is a string concatenation */
     case E_SWITCH:
         e->transfers_ownership = true; /* the result gets an owner (spec 10.1) */
         for (int i = 0; i < e->sw->arms.len; i++) {
@@ -1684,10 +1689,17 @@ static bool check_assign_target(Ctx *ctx, Expr *target) {
     switch (t->kind) {
     case E_VAR:
         if (t->var->kind == VAR_PARAM && t->var->is_ref) {
-            error_at(target->loc,
-                     "can't assign to reference parameter '%s' as a whole; it refers to the caller's value (assign its "
-                     "fields instead)",
-                     t->var->name);
+            if (t->var->type == type_string) {
+                error_at(target->loc,
+                         "can't assign to reference parameter '%s' as a whole; it refers to the caller's String (use "
+                         "%s.append(...) to add to it)",
+                         t->var->name, t->var->name);
+            } else {
+                error_at(target->loc,
+                         "can't assign to reference parameter '%s' as a whole; it refers to the caller's value (assign "
+                         "its fields instead)",
+                         t->var->name);
+            }
             return false;
         }
         return true;
@@ -2014,6 +2026,15 @@ static void check_assign(Ctx *ctx, Stmt *s) {
     bool is_bitwise = s->op == TOK_AMP_ASSIGN || s->op == TOK_PIPE_ASSIGN || s->op == TOK_CARET_ASSIGN;
     Type *vt = check_value(ctx, s->value, is_shift ? NULL : tt);
     if (is_error(tt) || is_error(vt)) return;
+    if (tt == type_string) {
+        /* a += b appends b to a (spec 6.5) */
+        if (s->op != TOK_PLUS_ASSIGN) {
+            error_at(s->loc, "'%s' doesn't apply to strings; only '+=' does", opname);
+        } else if (vt != type_string) {
+            error_at(s->value->loc, "'+=' appends a String, but this is %s; convert it with String.of(...)", type_name(vt));
+        }
+        return;
+    }
     if (is_shift || is_bitwise) {
         if (!type_is_integer(tt)) {
             error_at(s->loc, "'%s' needs an integer variable, found %s", opname, type_name(tt));

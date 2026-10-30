@@ -692,6 +692,15 @@ static const char *gen_binary(CG *cg, Expr *e) {
         return t;
     }
     Type *lt = e->base->type;
+    if (op == TOK_PLUS && e->type == type_string) {
+        /* concatenation: a new String; the operands are used in place */
+        const char *l = gen_ref(cg, e->base);
+        const char *r = gen_ref(cg, e->index);
+        const char *t = new_tmp(cg);
+        emit(cg, "nr_String %s = nr_str_concat(%s, %s);", t, l, r);
+        add_temp(cg, t, type_string);
+        return t;
+    }
     if (op == TOK_IS) {
         /* identity: both operands are references (spec 6.10) */
         if (lt->kind == TY_INTERFACE) {
@@ -942,6 +951,12 @@ static void gen_assign(CG *cg, Stmt *s) {
         return;
     }
     const char *place = gen_place(cg, target);
+    if (t == type_string) {
+        /* a += b appends in place */
+        const char *v = gen_ref(cg, s->value);
+        emit(cg, "nr_str_append(&%s, %s);", place, v);
+        return;
+    }
     const char *old = new_tmp(cg);
     emit(cg, "%s %s = %s;", ctype(t), old, place);
     const char *v = gen_expr(cg, s->value);
