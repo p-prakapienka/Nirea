@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.9 — Value parameters receive copies
+**Version:** 0.10 — Reference variables and reference returns
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, §6.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -173,7 +173,7 @@ Design rules:
 
 A struct implements an interface only by listing it after `:`. It must then declare a public method with the same name, parameter types and return type for every method of the interface. Having matching methods without listing the interface doesn't implement it.
 
-Interface types can be used only as reference parameter types, written `Drawable*` (§7.3). An interface parameter is a non-owning reference to a struct value that implements the interface, and calls through it use dynamic dispatch. Any struct that implements the interface can be passed for it, and an interface-typed parameter can itself be passed on to another parameter of the same interface type.
+Interface types can be used only as references, written `Drawable*`: as parameters (§7.3), reference variables and return values (§9). An interface parameter is a non-owning reference to a struct value that implements the interface, and calls through it use dynamic dispatch. Any struct that implements the interface can be passed for it, and an interface-typed parameter can itself be passed on to another parameter of the same interface type.
 
 ```nirea
 void render(Drawable* shape) {
@@ -187,7 +187,7 @@ void main() {
 }
 ```
 
-Variables, fields, array elements and return values of interface type are not supported yet (§18).
+Owned interface values, that is variables, fields, array elements and return values of an interface type without `*`, are not supported yet (§18).
 
 ### 5.4 Constructors
 
@@ -419,10 +419,7 @@ A local variable declared without an initialiser holds its type's zero value, ex
 
 Both operands must be values of the same type, after implicit conversion for numbers (§6.2).
 
-A reference (a `T*` parameter, `this`, or an alias of either) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. Readers coming from different languages would expect `==` on references to compare either addresses or values, so Nirea makes both explicit:
-
-- `a is b` checks whether two references point to the same object (§6.10).
-- `a.equals(b)` compares the values `a` and `b` refer to, by structure, exactly as `==` compares two values.
+A reference (§9) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. Readers coming from different languages would expect `==` on references to compare either addresses or values, so Nirea makes the comparison explicit: `a.equals(b)` compares the values `a` and `b` refer to, by structure, exactly as `==` compares two values. Comparing addresses is never needed, because two references in use never reach the same object (§9.3).
 
 `equals` is built in for every struct, array and `String` type. The object it is called on and its argument are both used in place, like `T*` parameters: nothing is copied and nothing changes owner. Either side can be a reference or a value, so `answer.equals("yes")` compares a `String*` parameter with a literal. Fields reached through a reference are values and can be compared with `==` directly (`a.x == b.x`). Interface values have no `equals`.
 
@@ -431,25 +428,6 @@ boolean sameContents(Engine* a, Engine* b) {
     return a.equals(b);          // compares the engines' fields
 }
 ```
-
-### 6.10 Identity
-
-`a is b` is `true` when the references `a` and `b` point to the same object in memory.
-
-```nirea
-boolean sameEngine(Engine* a, Engine* b) {
-    return a is b;
-}
-
-void main() {
-    Engine first = Engine(100);
-    Engine second = Engine(100);
-    println(sameEngine(first, first));    // true
-    println(sameEngine(first, second));   // false: equal values, different objects
-}
-```
-
-Both operands of `is` must be references of the same type. A value can't be an operand of `is`. The negation is written `!(a is b)`.
 
 ## 7. Ownership and memory safety
 
@@ -483,7 +461,7 @@ Ownership is transferred when a local variable is used as:
 
 Passing an object to a value parameter doesn't transfer ownership: the parameter receives a copy (§7.3).
 
-Only a local variable, as a whole, can give its object to a new owner; value parameters count as local variables. An object owned by another object is part of that owner's memory and stays part of it: fields and array elements can't be given to a new owner. Neither can the objects that reference parameters, `this` and aliases refer to, because they belong to someone else. To get an independent object from any of them, call `copy()`:
+Only a local variable, as a whole, can give its object to a new owner; value parameters count as local variables. An object owned by another object is part of that owner's memory and stays part of it: fields and array elements can't be given to a new owner. Neither can objects reached through a reference (§9), such as a reference parameter or `this`, because they belong to someone else. To get an independent object from any of them, call `copy()`:
 
 ```nirea
 Engine spare = vehicle.engine;          // error: a field stays part of its owner
@@ -500,7 +478,7 @@ if (ready) {
 println(first.getPower());   // error: first may no longer own an object
 ```
 
-A value produced by a call, such as `createEngine()` or `first.copy()`, has no other owner, so it can be used in any of these positions.
+A value produced by a call that returns a value, such as `createEngine()` or `first.copy()`, has no other owner, so it can be used in any of these positions.
 
 ### 7.2 Explicit copying
 
@@ -519,7 +497,7 @@ Engine second = first.copy();
 
 A struct, array or `String` parameter is either a value or a reference.
 
-A **value parameter**, written `Engine engine`, receives a copy of its argument: an object of its own in the called function's memory, owned by the function. The copy is deep, as with `copy()` (§7.2), and the caller's object is unchanged and stays usable. Any object can be passed by value: a local variable, a field, an array element, a reference or `this`. A call result, such as `createEngine()`, is passed without copying, since nothing else owns it.
+A **value parameter**, written `Engine engine`, receives a copy of its argument: an object of its own in the called function's memory, owned by the function. The copy is deep, as with `copy()` (§7.2), and the caller's object is unchanged and stays usable. Any object can be passed by value: a local variable, a field, an array element, a reference or `this`. A call result that is a new object, such as `createEngine()`, is passed without copying, since nothing else owns it.
 
 Inside the function, a value parameter is an owned local variable: it can be modified, assigned, returned, stored in a field or passed on by value. Changes to it aren't visible to the caller.
 
@@ -568,15 +546,15 @@ void setEngine(Engine* engine) {
 }
 ```
 
-`T*` is a reference, not a pointer. It is never null, has no arithmetic, and can only be the type of a parameter, so a reference can't outlive the object it refers to. Only struct, array, `String` and interface types can be passed by reference. Interface parameters must be references (§5.3).
+`T*` is a reference, not a pointer. It is never null and has no arithmetic. Besides parameters, it can be the type of a local variable or a return value (§9), but never of a field or array element, so a reference can't outlive the object it refers to. Only struct, array, `String` and interface types can be passed by reference. Interface parameters must be references (§5.3).
 
-The same object can be passed to several reference parameters of one call, as in `addFrom(counter, counter)`. Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
+A call can't reach the same object twice: the object a method is called on and the arguments for reference parameters must be different objects, and none can be part of another (§9.3). Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
 
 The method receiver `this` is a reference to the object the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
 
 Nothing is written at the call site to pass a value or a reference: the parameter declaration decides.
 
-References must not outlive their referenced objects. References exist only as parameters, `this` and aliases (§9), none of which can outlive the object they refer to.
+References must not outlive their referenced objects. Section 9 describes reference variables and functions that return references, and the rules that keep every reference valid.
 
 Raw pointers are not exposed in ordinary Nirea code.
 
@@ -655,41 +633,112 @@ Member visibility is public by default, with `private` available for encapsulati
 
 Operations remain explicit and visible in source code.
 
-## 9. Aliases
+## 9. References
 
-Nirea supports compile-time aliases for expressions.
+A reference, written `T*`, refers to an object where it is in memory, without owning it (§7.3). References come in four kinds:
 
-Aliases shorten repetitive access chains without creating additional variables or runtime objects.
+- reference parameters (§7.3);
+- `this`, inside methods and constructors;
+- reference variables (§9.1);
+- results of functions and methods that return a reference (§9.2).
+
+Only struct, array, `String` and interface types have references. A reference never owns its object: it can't give the object to a new owner (§7.1), and nothing is destroyed when a reference ends. To get an independent object from a reference, call `copy()`, or pass it to a value parameter, which receives a copy (§7.3).
+
+### 9.1 Reference variables
+
+A reference variable is declared with `*` after its type, and must be initialised:
 
 ```nirea
-void process(Vehicle* vehicle) {
-    alias engine = vehicle.engine;
-    alias power = engine.getPower();
-
-    println(power);
+void main() {
+    Vehicle vehicle = Vehicle();
+    Engine* engine = vehicle.engine;    // refers to the engine inside vehicle
+    engine.setPower(150);
+    engine.start();
 }
 ```
 
-The compiler expands aliases into their original expressions.
+The initialiser must be an existing object: a local variable, a parameter, `this`, a field or array element of one of these, another reference, or a call that returns a reference. A reference can't refer to a temporary object, such as a constructor call, a string literal, `copy()` or a call that returns a value. A reference variable of an interface type can refer to any struct value that implements the interface: `Drawable* shape = circle;`.
 
-### Alias rules
+A reference variable is set once, when it is declared. Assigning to it as a whole is an error:
 
-1. Aliases can only be declared inside functions.
-2. Aliases follow lexical block scope.
-3. Aliases cannot be declared globally or as struct members.
-4. Aliases introduce no storage.
-5. Aliases do not create copies.
-6. Aliases do not transfer ownership.
-7. Aliases are expanded at compile time.
-8. Aliases obey normal type and visibility rules.
-9. Aliases cannot bypass ownership restrictions.
-10. Aliases cannot introduce implicit operations.
+```nirea
+Engine* engine = vehicle.engine;
+engine.power = 200;                 // changes the engine inside vehicle
+engine = other.engine;              // error: a reference is set when it is declared
+```
 
-Aliases can refer to mutable locations when the underlying expression is assignable.
+Through a reference variable, code can read and write fields and elements and call methods, exactly as through a reference parameter (§7.3). A reference variable is scoped like any local variable, and refers only to an object that exists when it is declared, so it can't outlive that object. Section 9.3 describes what happens when the object is reached in another way.
 
-A method call returning a value is not automatically an assignable location.
+### 9.2 Returning references
 
-An alias's expression is resolved where the alias is declared, and evaluated again at each use. Following rule 6, an alias can't be the source of an ownership transfer: `Engine other = engine;` is an error when `engine` is an alias.
+A function or method returns a reference when `*` follows its return type. A method that returns `this` lets calls be chained:
+
+```nirea
+struct Builder {
+    int width;
+    int height;
+
+    Builder* setWidth(int width) {
+        this.width = width;
+        return this;
+    }
+
+    Builder* setHeight(int height) {
+        this.height = height;
+        return this;
+    }
+}
+
+void main() {
+    Builder builder = Builder();
+    builder.setWidth(10).setHeight(20);     // both calls change builder
+    Builder* same = builder.setWidth(30);   // a reference to builder
+    Builder other = builder.setWidth(40);   // error: a reference can't give its object to a new owner; use .copy()
+}
+```
+
+A function can only return a reference to an object that outlives the call: `this`, a reference parameter, a field or array element reached through one of them, or a reference variable or call result that refers to one of these. Returning a reference to a local variable, a value parameter or a temporary object is an error, because that object is destroyed when the function returns. Functions in `extern "C"` blocks can't return references.
+
+The caller can use the result directly, as in the chained calls above, or store it in a reference variable (§9.1). Either way, the result counts as reaching the object the method was called on and every argument passed to a reference parameter, each as a whole (§9.3). Storing the result requires all of these to be existing objects, not temporaries.
+
+### 9.3 One way to reach an object
+
+At any point, an object can be reached in only one way: through its owner, or through one reference. A reference variable ends as soon as its object is reached in another way:
+
+```nirea
+Engine* a = vehicle.engine;
+Engine* b = vehicle.engine;   // a new reference to the same engine: a ends
+a.power = 1;                  // error: a can no longer be used
+```
+
+Two objects overlap when they are the same object or one is part of the other: `vehicle`, `vehicle.engine` and `vehicle.engine.power` all overlap, while `vehicle.engine` and `vehicle.speed` don't. Array elements with different constant indexes, such as `engines[0]` and `engines[1]`, don't overlap. An element whose index is computed at run time, such as `engines[i]`, may be any element, so it overlaps every element of the array.
+
+A reference variable ends when:
+
+- another reference variable is declared that reaches an overlapping object, including one declared from it: after `Engine* b = a;`, `a` has ended;
+- an overlapping object is used in any other way: through its owner, a parameter, `this` or another reference. Reading or writing an object or its fields, calling a method on it, passing it to a function, copying it, assigning to it and giving it to a new owner all use it.
+
+```nirea
+Engine* engine = vehicle.engine;
+vehicle.speed = 50;           // speed doesn't overlap the engine
+engine.power = 120;
+vehicle.service();            // uses the whole vehicle: engine ends
+engine.power = 130;           // error: engine can no longer be used
+```
+
+Using a reference variable, including passing it to a reference parameter, doesn't end it. Reference parameters and `this` never end: using an object through them ends the reference variables that overlap it. A reference variable that has ended stays ended until the end of its scope. As with ownership transfers (§7.1), the compiler follows this through all control flow: using a reference variable that has ended, or may have ended on some path, is a compile-time error.
+
+A call can't reach the same object in two ways either. The object a method is called on and the arguments passed to reference parameters must not overlap:
+
+```nirea
+addFrom(counter, counter);           // error if both parameters are references
+vehicle.setEngine(vehicle.engine);   // error if setEngine takes an Engine*
+addFrom(counter, counter.copy());    // ok
+```
+
+The same holds for built-in methods, such as `text.append(text)` and `text.equals(text)`: pass `text.copy()` instead. Arguments for value parameters are copies (§7.3), so they never overlap.
+
+Because an object is never reachable through two references in use, replacing an object or giving it to a new owner can't leave a reference to the old object behind.
 
 ## 10. Control flow
 
@@ -716,7 +765,7 @@ A function with a non-`void` return type must return a value on every path. A pa
 
 Further rules:
 
-- A local variable can't have the same name as another local variable, parameter or alias that is in scope. A variable declared in a `for` header is scoped to the loop.
+- A local variable can't have the same name as another local variable or parameter that is in scope. A variable declared in a `for` header is scoped to the loop.
 - `break` and `continue` outside a loop are errors.
 - Statements after `return`, `break` or `continue` are allowed and never run.
 - Only calls can be used as expression statements. A call's result may be discarded.
@@ -754,7 +803,7 @@ switch (state) {
 
 An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values. A switch compares its subject with the case values, so the subject must be a value, not a reference (§6.9).
 
-A switch expression of a struct, array or `String` type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element, `this` or alias), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls or string literals, can be used anywhere.
+A switch expression of a struct, array or `String` type is used where its result gets an owner (§7.1): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element or reference), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls or string literals, can be used anywhere.
 
 `break` and `continue` inside a switch arm apply to the enclosing loop.
 
@@ -1182,7 +1231,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.9. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.10. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
@@ -1195,7 +1244,7 @@ decl           = functionDecl | structDecl | interfaceDecl | enumDecl
 functionDecl   = returnType IDENT "(" [ params ] ")" block ;
 params         = param { "," param } ;
 param          = type [ "*" ] IDENT ;                    (* "*": reference *)
-returnType     = "void" | type ;
+returnType     = "void" | type [ "*" ] ;                 (* "*": returns a reference *)
 
 structDecl     = "struct" IDENT [ ":" typeName { "," typeName } ] "{" { member } "}" ;
 member         = [ "private" ] type IDENT ";"                          (* field *)
@@ -1206,7 +1255,7 @@ enumDecl       = "enum" IDENT "{" IDENT { "," IDENT } [ "," ] "}" ;
 constDecl      = "const" type IDENT "=" constValue ";" ;
 constValue     = [ "-" ] literal | typeName "." IDENT ;
 externBlock    = "extern" STRING "{" { externFunction } "}" ;
-externFunction = returnType IDENT "(" [ externParams ] ")" ";" ;
+externFunction = ( "void" | type ) IDENT "(" [ externParams ] ")" ";" ;
 externParams   = "..." | externParam { "," externParam } [ "," "..." ] ;
 externParam    = type [ "*" ] IDENT ;                      (* "*" only for String *)
 
@@ -1218,19 +1267,19 @@ typeName       = IDENT [ "." IDENT ] ;
 arraySize      = INTEGER | typeName ;                                  (* integer constant *)
 
 block          = "{" { statement } "}" ;
-statement      = block | varDecl | aliasDecl | ifStmt | whileStmt | doStmt | forStmt
+statement      = block | varDecl | ifStmt | whileStmt | doStmt | forStmt
                | switchStmt | "break" ";" | "continue" ";" | "return" [ expr ] ";"
                | simpleStmt ";" ;
-varDecl        = type IDENT [ "=" initialiser ] ";" ;
+varDecl        = type IDENT [ "=" initialiser ] ";"
+               | type "*" IDENT "=" expr ";" ;                         (* reference variable *)
 initialiser    = expr | "{" initialiser { "," initialiser } [ "," ] "}" ;
-aliasDecl      = "alias" IDENT "=" expr ";" ;
 simpleStmt     = expr [ assignOp expr | "++" | "--" ] | ( "++" | "--" ) expr ;
 assignOp       = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
 ifStmt         = "if" "(" expr ")" statement [ "else" statement ] ;
 whileStmt      = "while" "(" expr ")" statement ;
 doStmt         = "do" statement "while" "(" expr ")" ";" ;
 forStmt        = "for" "(" [ forInit ] ";" [ expr ] ";" [ simpleStmt ] ")" statement ;
-forInit        = type IDENT "=" expr | simpleStmt ;
+forInit        = type [ "*" ] IDENT "=" expr | simpleStmt ;
 switchStmt     = "switch" "(" expr ")" "{" { switchLabel "->" statement } "}" ;
 switchLabel    = "case" caseValue { "," caseValue } | "default" ;
 caseValue      = IDENT | [ "-" ] INTEGER | CHARACTER | STRING | "true" | "false" ;
@@ -1241,7 +1290,7 @@ andExpr        = bitOrExpr { "&&" bitOrExpr } ;
 bitOrExpr      = bitXorExpr { "|" bitXorExpr } ;
 bitXorExpr     = bitAndExpr { "^" bitAndExpr } ;
 bitAndExpr     = equalityExpr { "&" equalityExpr } ;
-equalityExpr   = relationalExpr { ( "==" | "!=" | "is" ) relationalExpr } ;
+equalityExpr   = relationalExpr { ( "==" | "!=" ) relationalExpr } ;
 relationalExpr = shiftExpr { ( "<" | "<=" | ">" | ">=" ) shiftExpr } ;
 shiftExpr      = additiveExpr { ( "<<" | ">>" ) additiveExpr } ;
 additiveExpr   = multiplicativeExpr { ( "+" | "-" ) multiplicativeExpr } ;
@@ -1257,4 +1306,4 @@ switchExpr     = "switch" "(" expr ")" "{" { switchLabel "->" expr ";" } "}" ;
 literal        = INTEGER | FLOAT | CHARACTER | STRING | "true" | "false" ;
 ```
 
-`IMPORT_PATH` is the text between `import` and `;`, with surrounding whitespace removed. A statement that starts with `switch` is a switch statement. A statement that starts with a type followed by an identifier is a variable declaration.
+`IMPORT_PATH` is the text between `import` and `;`, with surrounding whitespace removed. A statement that starts with `switch` is a switch statement. A statement that starts with a type followed by an identifier, or by `*`, an identifier and `=`, is a variable declaration.
