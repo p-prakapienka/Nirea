@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.11 — Local variables are assigned before use
+**Version:** 0.12 — Arrays sized when created
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Version 0.11 requires local variables to be assigned before they are used, and adds `T[N]()` to create zero-filled arrays (§6.6, §6.8). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Version 0.11 requires local variables to be assigned before they are used (§6.8). Version 0.12 makes arrays Java-style: the type `T[]` has no size, and an array's length is fixed when it is created with `T[n]` (§6.6). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -130,7 +130,7 @@ struct Vec2 {
 
 Structs are intended to support predictable native data layouts and low-level development.
 
-Fields are stored inline, in declaration order. A struct can't contain itself, directly or through other structs or arrays.
+Fields are stored inline, in declaration order. An array field holds its length and a pointer to its elements, which the struct owns (§6.6). A struct can't contain itself, directly or through other structs; it can contain an array of itself, as in `struct Node { Node[] children; }`.
 
 Inside a method, fields and other methods of the same struct can be used by name, or through `this`: `this.x` and `x` are the same field. `this` is a non-owning reference to the value the method was called on (§7.3).
 
@@ -304,6 +304,7 @@ Integer overflow is a runtime error. So are:
 - dividing the smallest value of a signed type by `-1`, which overflows (the remainder of that division is `0`, not an error);
 - shifting by a negative amount, or by at least the width of the shifted type;
 - an array or string index out of range (§6.5, §6.6);
+- creating an array with a negative length, or more than 2147483647 elements (§6.6);
 - an invalid float-to-integer cast (§6.2);
 - text that `toInt`, `toInt64` or `toFloat64` can't parse (§6.5);
 - running out of memory.
@@ -370,26 +371,29 @@ Strings can be compared with `==` (§6.9), printed (§15) and passed to C functi
 
 ### 6.6 Arrays
 
-An array type `T[N]` holds exactly `N` elements of type `T`, stored inline. `N` is an integer literal or integer constant greater than zero.
+An array type `T[]` holds a sequence of elements of type `T`. As in Java, the type doesn't include a size: an array's length is fixed when the array is created, and never changes.
 
 ```nirea
-int[4] values = int[4]();                          // all elements are 0
-int[3] primes = {2, 3, 5};
-Vec2[2] corners = {Vec2(0.0, 0.0), Vec2(1.0, 1.0)};
-int[2][3] grid = int[2][3]();                      // 2 rows of 3 ints, all 0
+int[] values = int[4];                             // 4 elements, all 0
+int[] primes = {2, 3, 5};
+Vec2[] corners = {Vec2(0.0, 0.0), Vec2(1.0, 1.0)};
+int[][] grid = int[2][3];                          // 2 rows of 3 ints, all 0
 
 values[0] = 10;
 int count = values.length;                         // 4
 grid[1][2] = 7;
+int size = count * 2;
+float[] samples = float[size];                     // the length can be computed
 ```
 
-- `T[N]()` creates an array whose elements all hold their zero value (§6.8), even when `T` is a struct that declares a constructor.
-- An array initialiser `{...}` lists exactly `N` elements. It can be used only to initialise a variable declaration.
-- `a[i]` accesses an element. The index can have any integer type. An index outside `0` to `N - 1` is a runtime error.
+- `T[n]` creates an array of `n` elements, each holding its zero value (§6.8), even when `T` is a struct that declares a constructor. `n` can be any integer expression. A negative `n`, or one above 2147483647, is a runtime error (§6.4).
+- `T[a][b]` creates an array of `a` arrays, each of `b` elements. All sizes are evaluated, left to right, before any array is created. The rows of a `T[][]` are separate arrays and can be replaced, so they can have different lengths.
+- An array initialiser `{...}` creates an array with one element per value. It can be used only to initialise a variable declaration.
+- `a[i]` accesses an element. The index can have any integer type. An index outside `0` to `a.length - 1` is a runtime error.
 - `a.length` is the number of elements, as an `int`.
-- `T[A][B]` is an array of `A` elements of type `T[B]`.
-- Arrays are owned values, like structs: assignment transfers ownership of them and `copy()` copies them (§7).
-- Arrays can be local variables, fields, parameters (by value or by reference, §7.3) and return values. A reference to an array is written after its size: `int[4]* values`.
+- Arrays are owned values, like structs: assignment transfers ownership of them and `copy()` copies them (§7). An array's elements are stored outside its owner, and freed with the array (§7.6).
+- Arrays can be local variables, fields, elements of other arrays, parameters (by value or by reference, §7.3) and return values. A reference to an array is written `int[]* values`.
+- Growable arrays, such as lists, are an open question (§18).
 
 ### 6.7 Enums
 
@@ -407,9 +411,9 @@ Enum values are written qualified with the enum name, such as `State.IDLE`, exce
 
 ### 6.8 Zero values and initialisation
 
-Every type has a zero value: `0` for numbers, `false` for `boolean`, `'\0'` for `char`, `""` for `String`, the first value for an enum, all fields zero for a struct and all elements zero for an array.
+Every type has a zero value: `0` for numbers, `false` for `boolean`, `'\0'` for `char`, `""` for `String`, the first value for an enum, all fields zero for a struct and an empty array for an array type.
 
-Fields and array elements start at their zero value: a struct's fields when it is created with `T()` or before its constructor body runs (§5.4), and an array's elements when it is created with `T[N]()` (§6.6).
+Fields and array elements start at their zero value: a struct's fields when it is created with `T()` or before its constructor body runs (§5.4), and an array's elements when it is created with `T[n]` (§6.6). The zero value of an array type is an empty array, with length `0`.
 
 Local variables have no zero value. A local variable declared without an initialiser, such as `Circle circle;`, is only declared: it has no value until one is assigned to it as a whole, and using it before then is a compile error. Declaration and assignment can be split:
 
@@ -1017,7 +1021,6 @@ The first compiler rejects programs beyond these limits:
 
 - Expressions nested more than 1000 levels deep, counting each operator, call, member access and parenthesis.
 - Statements and array initialisers nested more than 1000 levels deep.
-- Types whose values could be larger than 2147483647 bytes.
 
 ### 13.3 Why C as an intermediate language?
 
@@ -1173,7 +1176,7 @@ The following decisions require further specification.
 | Generics    | Whether generics are included initially                                                                                                     |
 | Enums       | Variants with associated data                                                                                                               |
 | Strings     | Text processing beyond the built-in `String` methods, and Unicode text                                                                      |
-| Arrays      | Dynamically sized arrays and slices                                                                                                         |
+| Arrays      | Growable arrays (lists) and slices                                                                                                          |
 | FFI         | Struct, array, pointer and callback types at the C boundary                                                                                 |
 | Modules     | Per-file private declarations, and reopening a namespace in several places                                                                  |
 | ABI         | Native calling conventions and data layouts                                                                                                 |
@@ -1245,7 +1248,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.11. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.12. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
@@ -1273,12 +1276,11 @@ externFunction = ( "void" | type ) IDENT "(" [ externParams ] ")" ";" ;
 externParams   = "..." | externParam { "," externParam } [ "," "..." ] ;
 externParam    = type [ "*" ] IDENT ;                      (* "*" only for String *)
 
-type           = baseType { "[" arraySize "]" } ;
+type           = baseType { "[" "]" } ;
 baseType       = primitiveType | "String" | typeName ;
 primitiveType  = "boolean" | "char" | "int8" | "int16" | "int" | "int64"
                | "uint8" | "uint16" | "uint" | "uint64" | "float" | "float64" ;
 typeName       = IDENT [ "." IDENT ] ;
-arraySize      = INTEGER | typeName ;                                  (* integer constant *)
 
 block          = "{" { statement } "}" ;
 statement      = block | varDecl | ifStmt | whileStmt | doStmt | forStmt
@@ -1316,9 +1318,9 @@ postfixExpr    = primary { "." IDENT | "[" expr "]" | "(" [ args ] ")" } ;
 args           = expr { "," expr } ;
 primary        = literal | IDENT | "this" | "(" expr ")" | switchExpr
                | "String" "." IDENT                                     (* String.of *)
-               | baseType "[" arraySize "]" { "[" arraySize "]" } "(" ")" ;   (* new array *)
+               | baseType "[" expr "]" { "[" expr "]" } ;              (* new array *)
 switchExpr     = "switch" "(" expr ")" "{" { switchLabel "->" expr ";" } "}" ;
 literal        = INTEGER | FLOAT | CHARACTER | STRING | "true" | "false" ;
 ```
 
-`IMPORT_PATH` is the text between `import` and `;`, with surrounding whitespace removed. A statement that starts with `switch` is a switch statement. A statement that starts with a type followed by an identifier, or by `*`, an identifier and `=`, is a variable declaration. In an expression, `Name[N]()` creates an array when `Name` is a type; when it is a variable, `Name[N]` is an element.
+`IMPORT_PATH` is the text between `import` and `;`, with surrounding whitespace removed. A statement that starts with `switch` is a switch statement. A statement that starts with a type followed by an identifier, or by `*`, an identifier and `=`, is a variable declaration. In an expression, `Name[n]` creates an array when `Name` is a type; when it is a variable, it is an element.
