@@ -1,8 +1,12 @@
 // Arrays can be struct fields, stored inline (§6.6).
 
 struct Buffer {
-    int[4] data;
+    int[] data;
     int count;
+
+    Buffer() {
+        data = int[4];
+    }
 
     void push(int value) {
         data[count] = value;

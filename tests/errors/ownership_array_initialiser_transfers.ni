@@ -7,6 +7,6 @@ struct Engine {
 void main() {
     Engine left = Engine();
     Engine right = Engine();
-    Engine[2] pair = {left, right};
+    Engine[] pair = {left, right};
     println(left.power); // error
 }

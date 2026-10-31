@@ -11,7 +11,7 @@ struct Point {
 }
 
 void main() {
-    Point[3] points = Point[3]();
+    Point[] points = Point[3];
     points[1].x = 5;
     points[1].y = 6;
     println(points[0].x);           // expect: 0

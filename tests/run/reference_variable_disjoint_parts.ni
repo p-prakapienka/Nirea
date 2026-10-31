@@ -9,7 +9,11 @@ struct Engine {
 struct Vehicle {
     Engine engine;
     int speed;
-    Engine[2] spares;
+    Engine[] spares;
+
+    Vehicle() {
+        spares = Engine[2];
+    }
 }
 
 void main() {

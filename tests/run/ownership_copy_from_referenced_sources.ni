@@ -29,7 +29,7 @@ void main() {
     Engine fromParameter = copyParameter(vehicle.engine);
     println(fromParameter.power);   // expect: 10
 
-    Engine[2] engines = Engine[2]();
+    Engine[] engines = Engine[2];
     engines[0].power = 20;
     Engine fromElement = engines[0].copy();
     fromElement.power = 21;

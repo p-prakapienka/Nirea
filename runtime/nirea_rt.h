@@ -45,6 +45,13 @@ static inline const char *nr_cstr(const nr_String *s) {
 }
 
 void nr_str_free(nr_String *s);
+
+/* Arrays (spec 6.6). Elements start as all-zero bytes, which is the zero
+ * value of every type. */
+void *nr_array_alloc(int64_t count, size_t elem_size, const char *loc);
+void nr_array_free(void *elements);
+int64_t nr_array_size_i64(int64_t n, const char *loc);
+int64_t nr_array_size_u64(uint64_t n, const char *loc);
 nr_String nr_str_copy(const nr_String *s);
 bool nr_str_eq(const nr_String *a, const nr_String *b);
 int32_t nr_str_length(const nr_String *s, const char *loc);

@@ -21,10 +21,10 @@ void main() {
 
     int count;
     String label;
-    int[2] pair;
+    int[] pair;
     count = 3;
     label = "three";
-    pair = int[2]();
+    pair = int[2];
     pair[1] = count;
     println(label);                 // expect: three
     println(pair[1]);               // expect: 3

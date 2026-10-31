@@ -23,7 +23,11 @@ struct Engine {
 
 struct Vehicle {
     Engine engine;
-    Engine[2] spares;
+    Engine[] spares;
+
+    Vehicle() {
+        spares = Engine[2];
+    }
 }
 
 int boosted(Engine engine) {

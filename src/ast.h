@@ -44,7 +44,6 @@ struct Type {
     TypeKind kind;
     Decl *decl;     /* enum, struct, interface */
     Type *elem;     /* array */
-    int64_t length; /* array */
     const char *cname;
     bool emitted;   /* codegen bookkeeping */
     int drop_state; /* codegen: 0 unknown, 1 needs no cleanup, 2 needs cleanup */
@@ -53,7 +52,7 @@ struct Type {
 extern Type *type_error, *type_void, *type_bool, *type_char, *type_i8, *type_i16, *type_i32, *type_i64,
     *type_u8, *type_u16, *type_u32, *type_u64, *type_f32, *type_f64, *type_string;
 
-Type *type_array(Type *elem, int64_t length);
+Type *type_array(Type *elem); /* T[]: the length belongs to each array (spec 6.6) */
 int type_array_count(void);
 Type *type_array_at(int index);
 bool type_is_integer(Type *t);
@@ -66,22 +65,12 @@ const char *type_name(Type *t);
 
 /* ---- Type syntax ---- */
 
-typedef struct ArrayDim {
-    Loc loc;
-    bool is_literal;
-    uint64_t value;        /* is_literal */
-    const char *qualifier; /* namespace or NULL */
-    const char *name;      /* constant name */
-} ArrayDim;
-
-typedef VEC(ArrayDim) ArrayDimVec;
-
 typedef struct TypeExpr {
     Loc loc;
     Type *prim; /* primitive or String, else NULL */
     const char *qualifier;
     const char *name;
-    ArrayDimVec dims;
+    int dims; /* number of [] */
     bool is_void;
 } TypeExpr;
 
@@ -123,7 +112,7 @@ typedef enum ExprKind {
     E_CAST,
     E_SWITCH,
     E_ARRAY_INIT, /* {a, b, c}, only as a declaration initialiser */
-    E_NEW_ARRAY,  /* T[N](): a zero-filled array (cast_expr is T[N]) */
+    E_NEW_ARRAY,  /* T[n]...: a zero-filled array of element type cast_type (or cast_expr); args are the sizes */
 
     /* resolved */
     E_VAR,         /* local variable or parameter */
@@ -209,7 +198,7 @@ struct Expr {
     int op; /* TokenKind for unary/binary */
 
     Type *cast_type;     /* E_CAST target, E_CONVERT target */
-    TypeExpr *cast_expr; /* E_CAST target syntax, E_NEW_ARRAY type */
+    TypeExpr *cast_expr; /* E_CAST target syntax, E_NEW_ARRAY element type */
 
     SwitchData *sw;
 

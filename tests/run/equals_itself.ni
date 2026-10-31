@@ -12,6 +12,6 @@ void main() {
     println(engine.equals(engine));      // expect: true
     Engine* reference = engine;
     println(reference.equals(reference)); // expect: true
-    int[2] numbers = {1, 2};
+    int[] numbers = {1, 2};
     println(numbers.equals(numbers));    // expect: true
 }

@@ -2,12 +2,12 @@
 // dimension (§6.6).
 // runtime-error: index out of range
 
-int cell(int[2][3]* grid, int row, int column) {
+int cell(int[][]* grid, int row, int column) {
     return grid[row][column];
 }
 
 void main() {
-    int[2][3] grid = int[2][3]();
+    int[][] grid = int[2][3];
     grid[1][2] = 7;
     println(cell(grid, 1, 2));      // expect: 7
     println(cell(grid, 1, 3));

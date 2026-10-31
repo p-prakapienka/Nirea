@@ -1,5 +1,6 @@
 // Struct fields start at their zero value, including nested structs and
-// arrays, when the struct is created with T() (§5.4, §6.8).
+// arrays, when the struct is created with T(). An array field starts as an
+// empty array (§5.4, §6.8).
 
 enum Level {
     LOW,
@@ -20,8 +21,8 @@ struct Outer {
     String label;
     Level level;
     Inner inner;
-    int[3] values;
-    Inner[2] inners;
+    int[] values;
+    Inner[] inners;
 }
 
 void main() {
@@ -45,6 +46,6 @@ void main() {
     if (outer.inner.name == "") {
         println("inner name empty");    // expect: inner name empty
     }
-    println(outer.values[2]);       // expect: 0
-    println(outer.inners[1].count); // expect: 0
+    println(outer.values.length);   // expect: 0
+    println(outer.inners.length);   // expect: 0
 }

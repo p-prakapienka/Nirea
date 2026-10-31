@@ -178,7 +178,11 @@ struct Builder {
 }
 
 struct Garden {
-    Rectangle[3] beds;
+    Rectangle[] beds;
+
+    Garden() {
+        beds = Rectangle[3];                 // an array of 3 rectangles
+    }
 
     Rectangle* getBed(int index) {           // returns a reference into this garden
         return beds[index];
@@ -222,7 +226,7 @@ Engine* make() {
 
 ## Status
 
-Nirea is at an early stage. The first compiler, `nirea`, implements version 0.11 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.12 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
 
 ## Building the compiler
 
@@ -266,5 +270,5 @@ Options:
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.11, preliminary)
+- [Language design specification](docs/language-design.md) (v0.12, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors

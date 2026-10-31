@@ -22,13 +22,13 @@ void main() {
     println(vehicle.engine.power);          // expect: 1
 
     Engine second = createEngine(2);
-    Engine[2] engines = Engine[2]();
+    Engine[] engines = Engine[2];
     engines[1] = second;
     println(engines[1].power);              // expect: 2
 
     Engine third = createEngine(3);
     Engine fourth = createEngine(4);
-    Engine[2] pair = {third, fourth};
+    Engine[] pair = {third, fourth};
     println(pair[0].power + pair[1].power); // expect: 7
 
     vehicle.engine = createEngine(5);

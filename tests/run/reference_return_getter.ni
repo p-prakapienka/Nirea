@@ -7,8 +7,12 @@ struct Engine {
 
 struct Vehicle {
     Engine engine;
-    Engine[3] spares;
+    Engine[] spares;
     String name;
+
+    Vehicle() {
+        spares = Engine[3];
+    }
 
     Engine* getEngine() {
         return engine;

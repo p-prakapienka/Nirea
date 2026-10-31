@@ -236,52 +236,7 @@ static Decl *lookup_qualified(Ctx *ctx, const char *qualifier, const char *name,
 /* ---------------------------------------------------------------------- */
 /* Types                                                                   */
 
-static bool const_int_value(Decl *c, int64_t *out);
 
-/* Upper bound on the size of a type in bytes, saturating at UINT64_MAX. Every
- * field is counted as aligned to 8 bytes. */
-static uint64_t type_size_bound(Type *t) {
-    switch (t->kind) {
-    case TY_BOOL:
-    case TY_CHAR:
-    case TY_I8:
-    case TY_U8: return 1;
-    case TY_I16:
-    case TY_U16: return 2;
-    case TY_I32:
-    case TY_U32:
-    case TY_F32:
-    case TY_ENUM: return 4;
-    case TY_I64:
-    case TY_U64:
-    case TY_F64: return 8;
-    case TY_STRING:
-    case TY_INTERFACE: return 16;
-    case TY_ARRAY: {
-        uint64_t elem = type_size_bound(t->elem);
-        if (elem != 0 && (uint64_t)t->length > UINT64_MAX / elem) return UINT64_MAX;
-        return elem * (uint64_t)t->length;
-    }
-    case TY_STRUCT: {
-        uint64_t total = 8;
-        Decl *s = t->decl;
-        if (s->state == 1) return 8; /* cycle: reported separately */
-        s->state = 1;
-        for (int i = 0; i < s->members.len; i++) {
-            Decl *m = s->members.data[i];
-            if (m->kind != D_FIELD || !m->field_type) continue;
-            uint64_t f = type_size_bound(m->field_type);
-            f = f > UINT64_MAX - 7 ? UINT64_MAX : (f + 7) / 8 * 8;
-            total = f > UINT64_MAX - total ? UINT64_MAX : total + f;
-        }
-        s->state = 0;
-        return total;
-    }
-    default: return 0;
-    }
-}
-
-#define MAX_TYPE_SIZE 0x7fffffffULL
 
 static Type *resolve_type(Ctx *ctx, TypeExpr *te, bool allow_interface, const char *what) {
     if (te->is_void) {
@@ -305,43 +260,11 @@ static Type *resolve_type(Ctx *ctx, TypeExpr *te, bool allow_interface, const ch
         }
         t = d->type;
     }
-    if (t->kind == TY_INTERFACE && (te->dims.len > 0 || !allow_interface)) {
+    if (t->kind == TY_INTERFACE && (te->dims > 0 || !allow_interface)) {
         error_at(te->loc, "interface types can only be used as references, written %s*", type_name(t));
         return type_error;
     }
-    for (int i = te->dims.len - 1; i >= 0; i--) {
-        ArrayDim *dim = &te->dims.data[i];
-        int64_t length = 0;
-        if (dim->is_literal) {
-            if (dim->value == 0 || dim->value > 0x7fffffffULL) {
-                error_at(dim->loc, "array size must be between 1 and 2147483647");
-                return type_error;
-            }
-            length = (int64_t)dim->value;
-        } else {
-            Decl *c = dim->qualifier ? lookup_qualified(ctx, dim->qualifier, dim->name, dim->loc)
-                                     : lookup_decl(ctx, dim->name, dim->loc, true);
-            if (c == (Decl *)-1) return type_error;
-            if (!c || c->kind != D_CONST) {
-                error_at(dim->loc, "array size must be an integer literal or integer constant");
-                return type_error;
-            }
-            if (!const_int_value(c, &length)) {
-                error_at(dim->loc, "array size constant '%s' must be an integer", c->name);
-                return type_error;
-            }
-            if (length <= 0 || length > 0x7fffffffLL) {
-                error_at(dim->loc, "array size must be between 1 and 2147483647");
-                return type_error;
-            }
-        }
-        t = type_array(t, length);
-        if (type_size_bound(t) > MAX_TYPE_SIZE) {
-            error_at(te->loc, "type %s is too large: values are limited to %llu bytes", type_name(t),
-                     (unsigned long long)MAX_TYPE_SIZE);
-            return type_error;
-        }
-    }
+    for (int i = 0; i < te->dims; i++) t = type_array(t);
     return t;
 }
 
@@ -465,21 +388,6 @@ static void collect_program(Program *prog) {
 /* Constants                                                               */
 
 static Type *check_expr(Ctx *ctx, Expr *e, Type *expected);
-
-static bool const_int_value(Decl *c, int64_t *out) {
-    if (!c->const_type || !type_is_integer(c->const_type)) return false;
-    Expr *v = c->const_value;
-    while (v && v->kind == E_CONVERT) v = v->base;
-    if (!v || v->kind != E_INT) return false;
-    if (v->negative) {
-        if (v->int_value > 9223372036854775808ULL) return false;
-        *out = v->int_value == 9223372036854775808ULL ? INT64_MIN : -(int64_t)v->int_value;
-    } else {
-        if (v->int_value > (uint64_t)INT64_MAX) return false;
-        *out = (int64_t)v->int_value;
-    }
-    return true;
-}
 
 static void check_const(Program *prog, Decl *c) {
     Ctx ctx = {0};
@@ -641,7 +549,7 @@ static void resolve_struct_fields(Program *prog, Decl *s) {
 
 /* Detects structs that contain themselves through fields or arrays. */
 static bool struct_contains(Type *t, Decl *target) {
-    while (t->kind == TY_ARRAY) t = t->elem;
+    /* an array's elements are stored outside its owner (spec 5.2, 6.6) */
     if (t->kind != TY_STRUCT) return false;
     Decl *s = t->decl;
     if (s == target) return true;
@@ -659,15 +567,6 @@ static bool struct_contains(Type *t, Decl *target) {
 static void check_struct_cycles(Program *prog) {
     for (int i = 0; i < prog->all_structs.len; i++) {
         Decl *s = prog->all_structs.data[i];
-        bool cyclic = false;
-        for (int j = 0; j < s->members.len; j++) {
-            Decl *m = s->members.data[j];
-            if (m->kind == D_FIELD && m->field_type && struct_contains(m->field_type, s)) cyclic = true;
-        }
-        if (!cyclic && type_size_bound(s->type) > MAX_TYPE_SIZE) {
-            error_at(s->loc, "struct '%s' is too large: values are limited to %llu bytes", s->name,
-                     (unsigned long long)MAX_TYPE_SIZE);
-        }
         for (int j = 0; j < s->members.len; j++) {
             Decl *m = s->members.data[j];
             if (m->kind == D_FIELD && m->field_type && struct_contains(m->field_type, s)) {
@@ -1502,6 +1401,51 @@ static Type *check_literal_float(Expr *e, Type *expected) {
     return set_type(e, type_f64);
 }
 
+/* T[n][m]...: a new array of zero-filled elements (spec 6.6). The element
+ * type is cast_type, or cast_expr for primitive types and String; args are
+ * the sizes. */
+static Type *check_new_array(Ctx *ctx, Expr *e) {
+    Type *elem = e->cast_type ? e->cast_type : resolve_type(ctx, e->cast_expr, false, "an array element");
+    if (!is_error(elem) && elem->kind == TY_INTERFACE) {
+        error_at(e->loc, "arrays of interface type %s aren't supported", type_name(elem));
+        elem = type_error;
+    }
+    for (int i = 0; i < e->args.len; i++) {
+        Type *st = check_value(ctx, e->args.data[i], type_i32);
+        if (!is_error(st) && !type_is_integer(st)) {
+            error_at(e->args.data[i]->loc, "an array size must be an integer, found %s", type_name(st));
+        }
+    }
+    if (is_error(elem)) return set_type(e, type_error);
+    Type *t = elem;
+    for (int i = 0; i < e->args.len; i++) t = type_array(t);
+    return set_type(e, t);
+}
+
+/* Name[n]... creates an array when Name is a type rather than a variable
+ * (Appendix A). If so, turns e into an E_NEW_ARRAY. */
+static bool index_creates_array(Ctx *ctx, Expr *e) {
+    Expr *root = e;
+    int count = 0;
+    while (root->kind == E_INDEX) {
+        root = root->base;
+        count++;
+    }
+    if (root->kind != E_NAME && root->kind != E_MEMBER) return false;
+    resolve_path(ctx, root);
+    if (root->kind != E_TYPE_REF || !root->decl) return false;
+    Expr **sizes = xcalloc((size_t)count, sizeof(Expr *));
+    Expr *p = e;
+    for (int i = count - 1; i >= 0; i--, p = p->base) sizes[i] = p->index;
+    e->kind = E_NEW_ARRAY;
+    e->cast_type = root->decl->type;
+    e->args.len = 0;
+    for (int i = 0; i < count; i++) vec_push(e->args, sizes[i]);
+    e->base = NULL;
+    e->index = NULL;
+    return true;
+}
+
 static Type *check_expr(Ctx *ctx, Expr *e, Type *expected) {
     switch (e->kind) {
     case E_INT: return check_literal_int(e, expected);
@@ -1520,6 +1464,7 @@ static Type *check_expr(Ctx *ctx, Expr *e, Type *expected) {
         resolve_path(ctx, e);
         return e->type;
     case E_INDEX: {
+        if (index_creates_array(ctx, e)) return check_new_array(ctx, e);
         Type *bt = check_value(ctx, e->base, NULL);
         Type *it = check_value(ctx, e->index, NULL);
         if (!is_error(it) && !type_is_integer(it)) error_at(e->index->loc, "array index must be an integer, found %s", type_name(it));
@@ -1565,15 +1510,7 @@ static Type *check_expr(Ctx *ctx, Expr *e, Type *expected) {
     case E_ARRAY_INIT:
         error_at(e->loc, "an array initialiser '{...}' can only initialise a variable declaration");
         return set_type(e, type_error);
-    case E_NEW_ARRAY: {
-        /* T[N](): a zero-filled array (spec 6.6) */
-        TypeExpr *te = e->cast_expr;
-        if (!te->prim && !te->qualifier && find_scope(ctx, te->name)) {
-            error_at(e->loc, "'%s' is a variable, and an array element can't be called", te->name);
-            return set_type(e, type_error);
-        }
-        return set_type(e, resolve_type(ctx, te, false, "an array element"));
-    }
+    case E_NEW_ARRAY: return check_new_array(ctx, e);
     default:
         /* Already resolved (e.g. an implicit field reference). */
         return e->type ? e->type : set_type(e, type_error);
@@ -2110,10 +2047,6 @@ static void check_array_init(Ctx *ctx, Expr *init, Type *t) {
         return;
     }
     init->type = t;
-    if (init->args.len != t->length) {
-        error_at(init->loc, "array of type %s needs exactly %lld elements, but the initialiser has %d", type_name(t),
-                 (long long)t->length, init->args.len);
-    }
     for (int i = 0; i < init->args.len; i++) {
         Expr *el = init->args.data[i];
         if (el->kind == E_ARRAY_INIT) {

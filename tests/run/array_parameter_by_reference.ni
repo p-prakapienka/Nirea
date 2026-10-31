@@ -5,13 +5,13 @@ struct Counter {
     int count;
 }
 
-void fill(int[3]* values, int start) {
+void fill(int[]* values, int start) {
     for (int i = 0; i < values.length; i++) {
         values[i] = start + i;
     }
 }
 
-int sum(int[3]* values) {
+int sum(int[]* values) {
     int total = 0;
     for (int i = 0; i < values.length; i++) {
         total += values[i];
@@ -19,29 +19,29 @@ int sum(int[3]* values) {
     return total;
 }
 
-void bumpAll(Counter[2]* counters) {
+void bumpAll(Counter[]* counters) {
     counters[0].count++;
     counters[1].count += 10;
 }
 
-void markCorner(int[2][2]* grid) {
+void markCorner(int[][]* grid) {
     grid[1][1] = 4;
 }
 
 void main() {
-    int[3] numbers = int[3]();
+    int[] numbers = int[3];
     fill(numbers, 5);
     println(numbers[0]);            // expect: 5
     println(numbers[2]);            // expect: 7
     println(sum(numbers));          // expect: 18
 
-    Counter[2] counters = Counter[2]();
+    Counter[] counters = Counter[2];
     bumpAll(counters);
     bumpAll(counters);
     println(counters[0].count);     // expect: 2
     println(counters[1].count);     // expect: 20
 
-    int[2][2] grid = int[2][2]();
+    int[][] grid = int[2][2];
     markCorner(grid);
     println(grid[1][1]);            // expect: 4
 

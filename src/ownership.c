@@ -533,6 +533,7 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_EQUALS: visit_call(c, e, s); return;
     case E_CALL_PRINT:
     case E_ARRAY_INIT:
+    case E_NEW_ARRAY:
         for (int i = 0; i < e->args.len; i++) visit_expr(c, e->args.data[i], s);
         return;
     case E_SWITCH:

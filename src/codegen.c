@@ -242,8 +242,7 @@ static const char *vtable_name(Decl *s, Decl *iface) {
 
 /* True if values of t own heap memory, directly or through fields. */
 static bool needs_drop(Type *t) {
-    if (t->kind == TY_STRING) return true;
-    if (t->kind == TY_ARRAY) return needs_drop(t->elem);
+    if (t->kind == TY_STRING || t->kind == TY_ARRAY) return true; /* own heap memory */
     if (t->kind != TY_STRUCT) return false;
     if (t->drop_state) return t->drop_state == 2;
     t->drop_state = 1;
@@ -368,8 +367,8 @@ static const char *gen_place(CG *cg, Expr *e) {
         const char *t = new_tmp(cg);
         Type *it = e->index->type;
         bool is_unsigned = type_is_integer(it) && !type_is_signed(it);
-        emit(cg, "int64_t %s = nr_index_%s((%s)%s, %lld, %s);", t, is_unsigned ? "u64" : "i64",
-             is_unsigned ? "uint64_t" : "int64_t", index, (long long)e->base->type->length, loc_str(e->loc));
+        emit(cg, "int64_t %s = nr_index_%s((%s)%s, %s.len, %s);", t, is_unsigned ? "u64" : "i64",
+             is_unsigned ? "uint64_t" : "int64_t", index, base, loc_str(e->loc));
         return fmt_str("%s.a[%s]", base, t);
     }
     default: return gen_expr(cg, e);
@@ -775,6 +774,20 @@ static const char *gen_switch_expr(CG *cg, Expr *e) {
     return result;
 }
 
+/* Fills lvalue with a new array of t, sized sizes[k], whose elements are new
+ * arrays for the remaining sizes, or zero values (spec 6.6). */
+static void gen_new_array(CG *cg, const char *lvalue, Type *t, const char **sizes, int k, int count, const char *loc) {
+    emit(cg, "%s.len = %s;", lvalue, sizes[k]);
+    emit(cg, "%s.a = nr_array_alloc(%s, sizeof(%s), %s);", lvalue, sizes[k], ctype(t->elem), loc);
+    if (k + 1 == count) return;
+    const char *i = new_tmp(cg);
+    emit(cg, "for (int64_t %s = 0; %s < %s; %s++) {", i, i, sizes[k], i);
+    cg->indent++;
+    gen_new_array(cg, fmt_str("%s.a[%s]", lvalue, i), t->elem, sizes, k + 1, count, loc);
+    cg->indent--;
+    emit(cg, "}");
+}
+
 static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     if (e->implicit_copy) {
         /* an existing object passed to a value parameter is copied (spec 7.3) */
@@ -827,11 +840,11 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
         return t;
     }
     case E_LENGTH: {
-        /* The length is constant, but the base is still evaluated (and its
-         * indexes bounds-checked). */
+        /* at most 2147483647, checked when the array was created (spec 6.6) */
         const char *base = gen_lvalue(cg, e->base);
-        if (strchr(base, '[') || strchr(base, '(')) emit(cg, "(void)%s;", base);
-        return fmt_str("%lld", (long long)e->base->type->length);
+        const char *t = new_tmp(cg);
+        emit(cg, "int32_t %s = (int32_t)%s.len;", t, base);
+        return t;
     }
     case E_EQUALS: {
         /* the argument is a value parameter (spec 6.9), but it is only read,
@@ -876,8 +889,19 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     case E_SWITCH: return gen_switch_expr(cg, e);
     case E_TO_IFACE: return gen_iface_arg(cg, e);
     case E_NEW_ARRAY: {
+        /* every size is evaluated and checked before any array is created (spec 6.6) */
+        const char **sizes = xcalloc((size_t)e->args.len, sizeof(const char *));
+        for (int i = 0; i < e->args.len; i++) {
+            Expr *size = e->args.data[i];
+            const char *v = gen_expr(cg, size);
+            bool is_unsigned = !type_is_signed(size->type);
+            sizes[i] = new_tmp(cg);
+            emit(cg, "int64_t %s = nr_array_size_%s((%s)%s, %s);", sizes[i], is_unsigned ? "u64" : "i64",
+                 is_unsigned ? "uint64_t" : "int64_t", v, loc_str(size->loc));
+        }
         const char *t = new_tmp(cg);
         emit(cg, "%s %s = %s;", ctype(e->type), t, zero_init(e->type));
+        gen_new_array(cg, t, e->type, sizes, 0, e->args.len, loc_str(e->loc));
         add_temp(cg, t, e->type);
         return t;
     }
@@ -904,6 +928,9 @@ static const char *gen_condition(CG *cg, Expr *e, int mark) {
 /* Statements                                                              */
 
 static void gen_array_init(CG *cg, const char *place, Expr *init) {
+    emit(cg, "%s.len = %d;", place, init->args.len);
+    emit(cg, "%s.a = nr_array_alloc(%d, sizeof(%s), %s);", place, init->args.len, ctype(init->type->elem),
+         loc_str(init->loc));
     for (int i = 0; i < init->args.len; i++) {
         Expr *el = init->args.data[i];
         const char *elem_place = fmt_str("%s.a[%d]", place, i);
@@ -1148,9 +1175,10 @@ static const char *extern_c_type(Type *t) {
 static void emit_type_def(CG *cg, Type *t) {
     if (t->emitted) return;
     if (t->kind == TY_ARRAY) {
+        /* the elements are stored outside the array value (spec 6.6), so
+         * their type only needs to be declared */
         t->emitted = true;
-        if (type_is_owned(t->elem)) emit_type_def(cg, t->elem);
-        emit(cg, "struct %s { %s a[%lld]; };", ctype(t), ctype(t->elem), (long long)t->length);
+        emit(cg, "struct %s { %s *a; int64_t len; };", ctype(t), ctype(t->elem));
         return;
     }
     if (t->kind != TY_STRUCT) return;
@@ -1197,18 +1225,20 @@ static void emit_value_functions(CG *cg, Program *prog) {
         bool drops = needs_drop(t);
         if (t->kind == TY_ARRAY) {
             Type *el = t->elem;
-            if (drops) {
-                emit(cg, "static void nr_drop_%s(%s *p) {", c, c);
-                emit(cg, "    for (int64_t i = %lld; i >= 0; i--) %s", (long long)t->length - 1, drop_stmt(el, "p->a[i]"));
-                emit(cg, "}");
-                emit(cg, "static %s nr_copy_%s(const %s *p) {", c, c, c);
-                emit(cg, "    %s r;", c);
-                emit(cg, "    for (int64_t i = 0; i < %lld; i++) r.a[i] = %s;", (long long)t->length, copy_expr(el, "p->a[i]"));
-                emit(cg, "    return r;");
-                emit(cg, "}");
-            }
+            emit(cg, "static void nr_drop_%s(%s *p) {", c, c);
+            if (needs_drop(el)) emit(cg, "    for (int64_t i = p->len - 1; i >= 0; i--) %s", drop_stmt(el, "p->a[i]"));
+            emit(cg, "    nr_array_free(p->a);");
+            emit(cg, "}");
+            emit(cg, "static %s nr_copy_%s(const %s *p) {", c, c, c);
+            emit(cg, "    %s r;", c);
+            emit(cg, "    r.len = p->len;");
+            emit(cg, "    r.a = nr_array_alloc(p->len, sizeof(%s), \"?\");", ctype(el));
+            emit(cg, "    for (int64_t i = 0; i < p->len; i++) r.a[i] = %s;", copy_expr(el, "p->a[i]"));
+            emit(cg, "    return r;");
+            emit(cg, "}");
             emit(cg, "static bool nr_eq_%s(const %s *a, const %s *b) {", c, c, c);
-            emit(cg, "    for (int64_t i = 0; i < %lld; i++) {", (long long)t->length);
+            emit(cg, "    if (a->len != b->len) return false;");
+            emit(cg, "    for (int64_t i = 0; i < a->len; i++) {");
             emit(cg, "        if (!%s) return false;", paren(eq_expr(el, "a->a[i]", "b->a[i]")));
             emit(cg, "    }");
             emit(cg, "    return true;");

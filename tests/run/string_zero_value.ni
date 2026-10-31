@@ -13,7 +13,7 @@ void main() {
     print(label.text);
     println("]");                       // expect: []
 
-    String[2] names = String[2]();
+    String[] names = String[2];
     if (names[1] == "") {
         println("element is empty");    // expect: element is empty
     }

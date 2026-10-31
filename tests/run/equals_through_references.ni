@@ -22,7 +22,7 @@ boolean isYes(String* answer) {
     return answer.equals("yes");
 }
 
-int total(int[3]* values, int[3]* expected) {
+int total(int[]* values, int[]* expected) {
     if (values.equals(expected)) {
         return 1;
     }
@@ -43,8 +43,8 @@ void main() {
     answer.appendChar('!');
     println(isYes(answer));                  // expect: false
 
-    int[3] a = {1, 2, 3};
-    int[3] b = {1, 2, 3};
+    int[] a = {1, 2, 3};
+    int[] b = {1, 2, 3};
     println(total(a, b));                    // expect: 1
     println(a.equals(b) == (a == b));        // expect: true
 }

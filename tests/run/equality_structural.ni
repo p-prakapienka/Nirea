@@ -25,13 +25,13 @@ void main() {
     q.label.appendChar('!');
     println(p == q);                     // expect: false
 
-    int[3] xs = {1, 2, 3};
-    int[3] ys = {1, 2, 3};
+    int[] xs = {1, 2, 3};
+    int[] ys = {1, 2, 3};
     println(xs == ys);                   // expect: true
     ys[2] = 4;
     println(xs != ys);                   // expect: true
 
-    String[2] names = {"a", "b"};
-    String[2] others = {"a", "b"};
+    String[] names = {"a", "b"};
+    String[] others = {"a", "b"};
     println(names == others);            // expect: true
 }

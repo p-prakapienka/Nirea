@@ -5,6 +5,6 @@ struct Engine {
 }
 
 void main() {
-    Engine[2] engines;
+    Engine[] engines;
     Engine first = engines[0]; // error
 }

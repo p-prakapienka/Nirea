@@ -39,7 +39,7 @@ void main() {
     incrementThrice(panel.clicker); // expect: 3
     println(panel.clicker.value()); // expect: 3
 
-    Clicker[2] clickers = Clicker[2]();
+    Clicker[] clickers = Clicker[2];
     incrementThrice(clickers[1]);   // expect: 3
     incrementThrice(clickers[1]);   // expect: 6
     println(clickers[0].clicks);    // expect: 0

@@ -105,6 +105,7 @@ static int scan_type(Parser *p, int i) {
     } else {
         return -1;
     }
+    /* T[], or T[size] so that parse_type can explain that types have no size */
     while (p->toks[i].kind == TOK_LBRACKET) {
         i++;
         if (p->toks[i].kind == TOK_INT) {
@@ -112,8 +113,6 @@ static int scan_type(Parser *p, int i) {
         } else if (p->toks[i].kind == TOK_IDENT) {
             i++;
             if (p->toks[i].kind == TOK_DOT && p->toks[i + 1].kind == TOK_IDENT) i += 2;
-        } else {
-            return -1;
         }
         if (p->toks[i].kind != TOK_RBRACKET) return -1;
         i++;
@@ -137,7 +136,8 @@ static bool at_declaration(Parser *p) {
     return looks_like_type && p->toks[end + 2].kind == TOK_SEMI;
 }
 
-static TypeExpr *parse_type(Parser *p) {
+/* Parses the base of a type, without any []. */
+static TypeExpr *parse_type_base(Parser *p) {
     TypeExpr *te = NEW(TypeExpr);
     te->loc = cur(p)->loc;
     Type *prim = primitive_for(cur(p)->kind);
@@ -154,25 +154,19 @@ static TypeExpr *parse_type(Parser *p) {
     } else {
         fail_expected(p, "a type");
     }
+    return te;
+}
+
+static TypeExpr *parse_type(Parser *p) {
+    TypeExpr *te = parse_type_base(p);
     while (at(p, TOK_LBRACKET)) {
-        ArrayDim dim = {0};
-        dim.loc = cur(p)->loc;
-        next(p);
-        if (at(p, TOK_INT)) {
-            dim.is_literal = true;
-            dim.value = next(p)->int_value;
-        } else if (at(p, TOK_IDENT)) {
-            dim.name = next(p)->text;
-            if (at(p, TOK_DOT)) {
-                next(p);
-                dim.qualifier = dim.name;
-                dim.name = expect_ident(p, "a constant name");
-            }
-        } else {
-            fail_expected(p, "an array size");
+        Token *open = next(p);
+        if (!at(p, TOK_RBRACKET)) {
+            fail_at(p, open->loc,
+                    "an array type has no size: write T[], and give the size when creating the array, as in int[10]");
         }
-        expect(p, TOK_RBRACKET);
-        vec_push(te->dims, dim);
+        next(p);
+        te->dims++;
     }
     return te;
 }
@@ -317,17 +311,18 @@ static SwitchData *parse_switch_body(Parser *p, bool is_expr) {
 
 static Expr *parse_primary(Parser *p) {
     Token *t = cur(p);
-    if (primitive_for(t->kind) || t->kind == TOK_IDENT) {
-        /* T[N]() creates a zero-filled array (spec 6.6) */
-        int end = scan_type(p, p->pos);
-        if (end > 0 && p->toks[end - 1].kind == TOK_RBRACKET && p->toks[end].kind == TOK_LPAREN &&
-            p->toks[end + 1].kind == TOK_RPAREN) {
-            Expr *e = new_expr(E_NEW_ARRAY, t->loc);
-            e->cast_expr = parse_type(p);
-            expect(p, TOK_LPAREN);
-            expect(p, TOK_RPAREN);
-            return finish_expr(p, e);
+    if (primitive_for(t->kind) && peek_tok(p, 1)->kind == TOK_LBRACKET) {
+        /* int[n] creates a zero-filled array (spec 6.6); Name[n] is resolved
+         * by semantic analysis, which knows whether Name is a type */
+        Expr *e = new_expr(E_NEW_ARRAY, t->loc);
+        e->cast_expr = parse_type_base(p);
+        while (at(p, TOK_LBRACKET)) {
+            Token *open = next(p);
+            if (at(p, TOK_RBRACKET)) fail_at(p, open->loc, "give the array a size, as in int[10]");
+            vec_push(e->args, parse_expr(p));
+            expect(p, TOK_RBRACKET);
         }
+        return finish_expr(p, e);
     }
     switch (t->kind) {
     case TOK_INT: {
