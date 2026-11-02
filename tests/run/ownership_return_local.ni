@@ -10,14 +10,14 @@ struct Vehicle {
 }
 
 Engine buildEngine(int power) {
-    Engine engine;
+    Engine engine = Engine();
     engine.power = power;
     return engine;
 }
 
 Vehicle buildVehicle() {
     Engine engine = buildEngine(150);
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.engine = engine;
     vehicle.name = "car";
     return vehicle;

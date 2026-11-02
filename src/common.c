@@ -4,17 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-
-#ifdef _WIN32
-#include <direct.h>
-#include <windows.h>
-#define mkdir_one(p) _mkdir(p)
-#else
-#include <limits.h>
-#include <unistd.h>
-#define mkdir_one(p) mkdir((p), 0777)
-#endif
 
 void *xmalloc(size_t size) {
     void *p = malloc(size ? size : 1);
@@ -274,66 +263,4 @@ bool write_file(const char *path, const char *data, size_t len) {
     bool ok = fwrite(data, 1, len, f) == len;
     if (fclose(f) != 0) ok = false;
     return ok;
-}
-
-bool file_exists(const char *path) {
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
-}
-
-bool dir_exists(const char *path) {
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-char *path_join(const char *a, const char *b) {
-    if (!a || !*a) return xstrdup(b);
-    if (b[0] == '/') return xstrdup(b);
-    size_t la = strlen(a);
-    if (a[la - 1] == '/') return fmt_str("%s%s", a, b);
-    return fmt_str("%s/%s", a, b);
-}
-
-char *path_dirname(const char *path) {
-    const char *slash = strrchr(path, '/');
-#ifdef _WIN32
-    const char *bslash = strrchr(path, '\\');
-    if (bslash && (!slash || bslash > slash)) slash = bslash;
-#endif
-    if (!slash) return xstrdup(".");
-    if (slash == path) return xstrdup("/");
-    return xstrndup(path, (size_t)(slash - path));
-}
-
-char *path_realpath(const char *path) {
-#ifdef _WIN32
-    char buf[4096];
-    if (!file_exists(path) && !dir_exists(path)) return NULL;
-    if (!_fullpath(buf, path, sizeof buf)) return NULL;
-    return xstrdup(buf);
-#else
-    char *r = realpath(path, NULL);
-    if (!r) return NULL;
-    char *copy = xstrdup(r);
-    free(r);
-    return copy;
-#endif
-}
-
-bool make_dirs(const char *path) {
-    char *p = xstrdup(path);
-    size_t len = strlen(p);
-    for (size_t i = 1; i <= len; i++) {
-        if (p[i] == '/' || p[i] == '\0') {
-            char saved = p[i];
-            p[i] = '\0';
-            if (!dir_exists(p) && mkdir_one(p) != 0 && errno != EEXIST) {
-                free(p);
-                return false;
-            }
-            p[i] = saved;
-        }
-    }
-    free(p);
-    return true;
 }

@@ -6,7 +6,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     engine.power = 3;
     for (int i = 0; i < 5; i++) {
         if (i == 2) {

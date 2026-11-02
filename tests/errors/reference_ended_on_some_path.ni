@@ -5,7 +5,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     boolean ready = true;
     Engine* reference = engine;
     if (ready) {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Nirea VERSION 0.9.0 LANGUAGES C)
+project(Nirea VERSION 0.12.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -35,9 +35,12 @@ add_executable(nirea
     src/ownership.c
     src/codegen.c
     src/driver.c
+    src/platform.c
     ${EMBEDDED_RUNTIME})
 target_include_directories(nirea PRIVATE src)
-target_compile_definitions(nirea PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+if(NOT WIN32)
+    target_compile_definitions(nirea PRIVATE _POSIX_C_SOURCE=200809L _DEFAULT_SOURCE)
+endif()
 
 install(TARGETS nirea RUNTIME DESTINATION bin)
 

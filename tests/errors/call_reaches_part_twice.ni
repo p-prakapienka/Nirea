@@ -14,7 +14,7 @@ struct Vehicle {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     Engine* engine = vehicle.engine;
     vehicle.install(engine); // error: this call already reaches vehicle.engine
 }

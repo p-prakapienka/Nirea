@@ -1,7 +1,7 @@
 // An array index can have any integer type (§6.6).
 
 void main() {
-    int[4] values = {10, 20, 30, 40};
+    int[] values = {10, 20, 30, 40};
     int8 tiny = 0;
     uint8 small = 1;
     int64 big = 2;

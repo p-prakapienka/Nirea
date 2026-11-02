@@ -6,7 +6,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     Engine* reference = engine;
     for (int i = 0; i < 3; i++) {
         reference.power = i; // error: may have ended on some path

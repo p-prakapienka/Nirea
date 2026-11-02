@@ -23,7 +23,7 @@ int measure(Shape* shape) {
 }
 
 void main() {
-    Square square;
+    Square square = Square();
     square.side = 3;
     Shape* shape = square;
     shape.grow();

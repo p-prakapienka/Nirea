@@ -7,7 +7,11 @@ struct Engine {
 
 struct Vehicle {
     Engine engine;
-    Engine[2] spares;
+    Engine[] spares;
+
+    Vehicle() {
+        spares = Engine[2];
+    }
 }
 
 void install(Engine* engine) {
@@ -15,7 +19,7 @@ void install(Engine* engine) {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     install(vehicle.engine);
     install(vehicle.spares[1]);
     install(vehicle.spares[1]);

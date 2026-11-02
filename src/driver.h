@@ -2,6 +2,7 @@
 #define NIREA_DRIVER_H
 
 #include "common.h"
+#include "platform.h"
 
 typedef struct BuildOptions {
     const char *input;      /* project directory or .ni file */
@@ -17,10 +18,5 @@ typedef struct BuildOptions {
  * stores the executable path in *exe_out. temp_dir_out receives a temporary
  * directory the caller must remove with remove_dir_tree, or NULL. */
 int nirea_build(BuildOptions *opts, char **exe_out, char **temp_dir_out);
-
-/* Runs a program and returns its exit status (or 128 + signal). */
-int run_process(const char *const *argv);
-
-void remove_dir_tree(const char *dir);
 
 #endif

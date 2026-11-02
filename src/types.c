@@ -23,15 +23,14 @@ Type *type_error = &t_error, *type_void = &t_void, *type_bool = &t_bool, *type_c
 
 static VEC(Type *) array_types;
 
-Type *type_array(Type *elem, int64_t length) {
+Type *type_array(Type *elem) {
     for (int i = 0; i < array_types.len; i++) {
         Type *t = array_types.data[i];
-        if (t->elem == elem && t->length == length) return t;
+        if (t->elem == elem) return t;
     }
     Type *t = NEW(Type);
     t->kind = TY_ARRAY;
     t->elem = elem;
-    t->length = length;
     t->cname = fmt_str("nr_arr%d", array_types.len);
     vec_push(array_types, t);
     return t;
@@ -102,16 +101,7 @@ const char *type_name(Type *t) {
     case TY_INTERFACE:
         if (t->decl->ns) return fmt_str("%s.%s", t->decl->ns->name, t->decl->name);
         return t->decl->name;
-    case TY_ARRAY: {
-        /* T[A][B] is an array of A elements of type T[B]. */
-        Type *base = t;
-        StrBuf dims = {0};
-        while (base->kind == TY_ARRAY) {
-            sb_printf(&dims, "[%lld]", (long long)base->length);
-            base = base->elem;
-        }
-        return fmt_str("%s%s", type_name(base), sb_cstr(&dims));
-    }
+    case TY_ARRAY: return fmt_str("%s[]", type_name(t->elem));
     }
     return "?";
 }

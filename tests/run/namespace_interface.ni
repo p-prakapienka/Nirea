@@ -21,7 +21,7 @@ struct Circle : Graphics.Drawable {
 }
 
 void main() {
-    Circle circle;
+    Circle circle = Circle();
     circle.radius = 2;
     Graphics.render(circle);        // expect: circle 2
 }

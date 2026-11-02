@@ -15,12 +15,22 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#include <process.h>
+#define EXE_SUFFIX ".exe"
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#define EXE_SUFFIX ""
+#endif
 
 typedef struct Lines {
     char **items;
@@ -57,6 +67,13 @@ static char *trim_right(char *s) {
     return s;
 }
 
+static char *copy_n(const char *s, size_t n) {
+    char *r = malloc(n + 1);
+    memcpy(r, s, n);
+    r[n] = '\0';
+    return r;
+}
+
 /* Splits text into lines; a final newline doesn't start an extra line. */
 static Lines split_lines(const char *text) {
     Lines l = {0};
@@ -64,13 +81,74 @@ static Lines split_lines(const char *text) {
     while (*p) {
         const char *nl = strchr(p, '\n');
         size_t n = nl ? (size_t)(nl - p) : strlen(p);
-        char *line = strndup(p, n);
+        char *line = copy_n(p, n);
         lines_push(&l, trim_right(line));
         if (!nl) break;
         p = nl + 1;
     }
     return l;
 }
+
+#ifdef _WIN32
+
+/* Quotes one argument for a Windows command line. */
+static char *quote_arg(const char *arg) {
+    if (*arg && !strpbrk(arg, " \t\n\v\"")) return (char *)arg;
+    char *q = malloc(strlen(arg) * 2 + 3);
+    char *o = q;
+    *o++ = '"';
+    for (const char *p = arg;; p++) {
+        size_t backslashes = 0;
+        while (*p == '\\') {
+            p++;
+            backslashes++;
+        }
+        if (!*p) {
+            for (size_t i = 0; i < backslashes * 2; i++) *o++ = '\\';
+            break;
+        }
+        size_t n = *p == '"' ? backslashes * 2 + 1 : backslashes;
+        for (size_t i = 0; i < n; i++) *o++ = '\\';
+        *o++ = *p;
+    }
+    *o++ = '"';
+    *o = '\0';
+    return q;
+}
+
+/* Runs argv with stdout and stderr redirected to files. Returns exit status. */
+static int run(char **argv, const char *out_path, const char *err_path) {
+    fflush(stdout);
+    fflush(stderr);
+    int out = _open(out_path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE);
+    int err = _open(err_path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if (out < 0 || err < 0) return -1;
+    int saved_out = _dup(1), saved_err = _dup(2);
+    _dup2(out, 1);
+    _dup2(err, 2);
+    int argc = 0;
+    while (argv[argc]) argc++;
+    char **quoted = calloc((size_t)argc + 1, sizeof(char *));
+    for (int i = 0; i < argc; i++) quoted[i] = quote_arg(argv[i]);
+    intptr_t status = _spawnv(_P_WAIT, argv[0], (const char *const *)quoted);
+    _dup2(saved_out, 1);
+    _dup2(saved_err, 2);
+    _close(saved_out);
+    _close(saved_err);
+    _close(out);
+    _close(err);
+    return (int)status;
+}
+
+static void make_dir(const char *path) {
+    _mkdir(path);
+}
+
+static char *full_path(const char *path) {
+    return _fullpath(NULL, path, 0);
+}
+
+#else
 
 /* Runs argv with stdout and stderr redirected to files. Returns exit status. */
 static int run(char **argv, const char *out_path, const char *err_path) {
@@ -96,6 +174,16 @@ static int run(char **argv, const char *out_path, const char *err_path) {
     return -1;
 }
 
+static void make_dir(const char *path) {
+    mkdir(path, 0777);
+}
+
+static char *full_path(const char *path) {
+    return realpath(path, NULL);
+}
+
+#endif
+
 static char *join(const char *a, const char *b) {
     char *s = malloc(strlen(a) + strlen(b) + 2);
     sprintf(s, "%s/%s", a, b);
@@ -109,15 +197,16 @@ static void print_file(const char *title, const char *path) {
 }
 
 static void mkdir_p(const char *path) {
-    char *p = strdup(path);
+    char *p = copy_n(path, strlen(path));
     for (char *s = p + 1; *s; s++) {
-        if (*s == '/') {
+        if (*s == '/' || *s == '\\') {
+            char saved = *s;
             *s = '\0';
-            mkdir(p, 0777);
-            *s = '/';
+            make_dir(p);
+            *s = saved;
         }
     }
-    mkdir(p, 0777);
+    make_dir(p);
     free(p);
 }
 
@@ -184,7 +273,7 @@ static int check_run_result(Expectations *ex, int status, const char *out, const
 
 static int test_run(char *nirea, char *file, char *work) {
     mkdir_p(work);
-    char *exe = join(work, "program");
+    char *exe = join(work, "program" EXE_SUFFIX);
     char *cdir = join(work, "c");
     char *out = join(work, "stdout.txt");
     char *err = join(work, "stderr.txt");
@@ -283,7 +372,7 @@ static int test_error(char *nirea, char *file, char *work) {
 
 static int test_project(char *nirea, char *dir, char *work) {
     mkdir_p(work);
-    char *exe = join(work, "program");
+    char *exe = join(work, "program" EXE_SUFFIX);
     char *cdir = join(work, "c");
     char *out = join(work, "stdout.txt");
     char *err = join(work, "stderr.txt");
@@ -318,7 +407,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: nirea-test run|error|project NIREA PATH WORKDIR\n");
         return 2;
     }
-    char *nirea = realpath(argv[2], NULL);
+    char *nirea = full_path(argv[2]);
     if (!nirea) {
         fprintf(stderr, "can't find compiler %s\n", argv[2]);
         return 2;

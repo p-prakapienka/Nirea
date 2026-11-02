@@ -17,7 +17,7 @@ void main() {
     println(greeting);                       // expect: Hello, Nirea! v8
     println(greet(name));                    // expect: Hello, Nirea!
 
-    Person person;
+    Person person = Person();
     person.name = "Ada";
     person.name += " Lovelace";
     println(person.name);                    // expect: Ada Lovelace
@@ -27,7 +27,7 @@ void main() {
     twice += twice;
     println(twice);                          // expect: NireaNirea
 
-    String built;
+    String built = "";
     for (int i = 0; i < 3; i++) {
         built = built + String.of(i);
     }

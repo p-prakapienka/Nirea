@@ -34,7 +34,7 @@ void showSize(Measured* measured) {
 }
 
 void main() {
-    Box box;
+    Box box = Box();
     box.side = 4;
     showName(box);                  // expect: box
     showSize(box);                  // expect: 40

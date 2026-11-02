@@ -1,11 +1,12 @@
 /* The nirea command-line tool. */
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "driver.h"
 
-#define NIREA_VERSION "0.9.0"
+#define NIREA_VERSION "0.12.0"
 
 static void usage(FILE *f) {
     fprintf(f,
@@ -16,13 +17,14 @@ static void usage(FILE *f) {
             "  nirea check [PROJECT_DIR | FILE.ni]             check the program without building it\n"
             "\n"
             "A project directory holds sources in src/main/nirea and builds into target/\n"
-            "(generated C in target/generated-c, executable target/nirea-app). The default\n"
-            "is the current directory.\n"
+            "(generated C in target/generated-c, executable target/nirea-app, with .exe on\n"
+            "Windows). The default is the current directory.\n"
             "\n"
             "Options:\n"
             "  -o FILE          write the executable to FILE\n"
             "  --emit-c DIR     write the generated C to DIR\n"
-            "  --cc COMPILER    C compiler to use (default: $CC, then cc)\n"
+            "  --cc COMPILER    C compiler to use (default: $CC, then cc; on Windows gcc,\n"
+            "                   then clang)\n"
             "  -lLIB, -LDIR     passed to the C compiler, e.g. to link C libraries\n"
             "  --version        print the compiler version\n");
 }
@@ -96,10 +98,13 @@ int main(int argc, char **argv) {
         return status;
     }
     StrVec pargv = {0};
-    vec_push(pargv, strchr(exe, '/') ? exe : fmt_str("./%s", exe));
+    vec_push(pargv, command_path(exe));
     for (int i = prog_args_start; i < argc; i++) vec_push(pargv, argv[i]);
     vec_push(pargv, NULL);
-    status = run_process(pargv.data);
+    if (!run_process(pargv.data, &status)) {
+        fprintf(stderr, "nirea: error: can't run %s: %s\n", exe, strerror(errno));
+        status = 127;
+    }
     if (temp_dir) remove_dir_tree(temp_dir);
     return status;
 }

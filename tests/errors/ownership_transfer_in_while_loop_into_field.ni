@@ -10,8 +10,8 @@ struct Vehicle {
 }
 
 void main() {
-    Engine engine;
-    Vehicle vehicle;
+    Engine engine = Engine();
+    Vehicle vehicle = Vehicle();
     int laps = 0;
     while (laps < 3) {
         vehicle.engine = engine; // error

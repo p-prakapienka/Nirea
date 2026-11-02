@@ -22,7 +22,7 @@ void look(Box* box, int n) {
 }
 
 void main() {
-    Box a;
+    Box a = Box();
     a.x = 5;
     look(a, consume(a));                 // expect: 11
     a.show(consume(a));                  // expect: 11

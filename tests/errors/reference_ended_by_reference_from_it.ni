@@ -6,7 +6,7 @@ struct Engine {
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     Engine* a = engine;
     Engine* b = a;
     b.power = 1;

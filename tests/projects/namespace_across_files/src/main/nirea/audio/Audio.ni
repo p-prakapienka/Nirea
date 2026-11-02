@@ -16,7 +16,7 @@ namespace Audio {
     }
 
     Track makeTrack(int length) {
-        Track track;
+        Track track = Track();
         track.length = length;
         track.kind = Kind.SONG;
         return track;

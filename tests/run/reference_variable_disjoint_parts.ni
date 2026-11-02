@@ -9,11 +9,15 @@ struct Engine {
 struct Vehicle {
     Engine engine;
     int speed;
-    Engine[2] spares;
+    Engine[] spares;
+
+    Vehicle() {
+        spares = Engine[2];
+    }
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     Engine* engine = vehicle.engine;
     vehicle.speed = 50;
     engine.power = 120;

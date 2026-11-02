@@ -6,8 +6,8 @@ struct Engine {
 }
 
 void choose(int choice) {
-    Engine small;
-    Engine large;
+    Engine small = Engine();
+    Engine large = Engine();
     Engine chosen = switch (choice) {
         case 1 -> small;
         default -> large;

@@ -9,8 +9,8 @@ struct Vehicle {
 }
 
 void main() {
-    Engine engine;
-    Vehicle vehicle;
+    Engine engine = Engine();
+    Vehicle vehicle = Vehicle();
     vehicle.engine = engine;
     println(engine.power); // error
 }

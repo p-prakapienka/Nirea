@@ -15,13 +15,13 @@ struct Vehicle {
 }
 
 void main() {
-    Vehicle car;
+    Vehicle car = Vehicle();
     car.name = "car";
     car.engine.power = 100;
     car.engine.boost(20);
     println(car.engine.power);      // expect: 120
 
-    Engine replacement;
+    Engine replacement = Engine();
     replacement.power = 7;
     car.engine = replacement;
     println(car.engine.power);      // expect: 7

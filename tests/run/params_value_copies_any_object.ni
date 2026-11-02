@@ -23,7 +23,11 @@ struct Engine {
 
 struct Vehicle {
     Engine engine;
-    Engine[2] spares;
+    Engine[] spares;
+
+    Vehicle() {
+        spares = Engine[2];
+    }
 }
 
 int boosted(Engine engine) {
@@ -47,7 +51,7 @@ void main() {
     println(engine.power);               // expect: 1
     println(engine.name);                // expect: e
 
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.engine = Engine(2, "v");
     vehicle.spares[1] = Engine(3, "s");
     println(boosted(vehicle.engine));    // expect: 102

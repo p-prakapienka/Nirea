@@ -5,7 +5,7 @@ struct Engine {
 }
 
 void check(boolean ready) {
-    Engine first;
+    Engine first = Engine();
     if (ready) {
         Engine second = first;
         println(second.power);

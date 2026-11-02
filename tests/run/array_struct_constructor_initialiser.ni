@@ -12,7 +12,7 @@ struct Vec2 {
 }
 
 void main() {
-    Vec2[2] corners = {Vec2(1.0, 2.5), Vec2(-3.0, 1.0)};
+    Vec2[] corners = {Vec2(1.0, 2.5), Vec2(-3.0, 1.0)};
     println(corners[0].y);          // expect: 2.5
     println(corners[1].x);          // expect: -3.0
     println(corners.length);        // expect: 2

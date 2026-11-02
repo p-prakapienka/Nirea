@@ -25,7 +25,7 @@ void service(Vehicle* vehicle) {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     vehicle.engine.power = 1;
     service(vehicle);
     println(vehicle.engine.power);    // expect: 12

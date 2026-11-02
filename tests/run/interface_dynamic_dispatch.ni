@@ -38,9 +38,9 @@ void describe(Shape* shape) {
 }
 
 void main() {
-    Square square;
+    Square square = Square();
     square.side = 3;
-    Rectangle rectangle;
+    Rectangle rectangle = Rectangle();
     rectangle.width = 2;
     rectangle.height = 5;
     describe(square);               // expect: square 9

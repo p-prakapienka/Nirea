@@ -21,6 +21,7 @@ void main() {
 
 - Free functions, structs with methods, interfaces and namespaces. No classes or inheritance.
 - Exclusive ownership checked by the compiler. No garbage collector and no user-visible raw pointers.
+- No hidden values: objects are created explicitly, as in `Circle circle = Circle();`, and a local variable must be assigned before it is used.
 - Ahead-of-time compilation to native code, with direct interoperability with C libraries.
 - A small language core, with further functionality in optional libraries.
 
@@ -177,7 +178,11 @@ struct Builder {
 }
 
 struct Garden {
-    Rectangle[3] beds;
+    Rectangle[] beds;
+
+    Garden() {
+        beds = Rectangle[3];                 // an array of 3 rectangles
+    }
 
     Rectangle* getBed(int index) {           // returns a reference into this garden
         return beds[index];
@@ -221,7 +226,7 @@ Engine* make() {
 
 ## Status
 
-Nirea is at an early stage. The first compiler, `nirea`, implements version 0.10 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.12 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
 
 ## Building the compiler
 
@@ -233,6 +238,18 @@ cmake --build build
 ctest --test-dir build -j8      # run the test suite
 ```
 
+### Windows
+
+Install CMake and a MinGW-w64 toolchain: GCC (for example from MSYS2 or WinLibs) or Clang (for example llvm-mingw). With GCC:
+
+```sh
+cmake -S . -B build -G "MinGW Makefiles"
+cmake --build build
+ctest --test-dir build -j8
+```
+
+The compiler is `build\nirea.exe`. It needs GCC or Clang on `PATH` to build programs too, because it compiles the C it generates with them. Microsoft's C compiler (`cl.exe`) isn't supported.
+
 ## Using the compiler
 
 ```sh
@@ -242,16 +259,16 @@ nirea build path/to/project           # build a project into target/
 nirea check path/to/project           # check without building
 ```
 
-A project keeps its sources in `src/main/nirea`. `nirea build` writes the generated C to `target/generated-c/` and the executable to `target/nirea-app`. When you build a single file, the compiler also loads the files it imports.
+A project keeps its sources in `src/main/nirea`. `nirea build` writes the generated C to `target/generated-c/` and the executable to `target/nirea-app` (`nirea-app.exe` on Windows, where executables always get `.exe`). When you build a single file, the compiler also loads the files it imports.
 
 Options:
 
 - `-o FILE` sets the executable path.
 - `--emit-c DIR` keeps the generated C in `DIR`.
-- `--cc COMPILER` selects the C compiler; the default is `$CC`, then `cc`.
+- `--cc COMPILER` selects the C compiler. The default is `$CC`, then `cc`; on Windows, `$CC`, then `gcc`, then `clang`.
 - `-lLIB` and `-LDIR` are passed to the C compiler, for example to link C libraries used through `extern "C"`.
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.10, preliminary)
+- [Language design specification](docs/language-design.md) (v0.12, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors

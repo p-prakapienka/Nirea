@@ -5,7 +5,7 @@ struct Engine {
 }
 
 void main() {
-    Engine first;
+    Engine first = Engine();
     Engine second = first;
     println(second.power);
     println(first.power); // error

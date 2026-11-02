@@ -6,7 +6,7 @@ struct Engine {
 }
 
 Engine createEngine(int power) {
-    Engine engine;
+    Engine engine = Engine();
     engine.power = power;
     return engine;
 }

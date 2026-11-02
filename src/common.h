@@ -93,14 +93,8 @@ void error_at(Loc loc, const char *fmt, ...);
 void note_at(Loc loc, const char *fmt, ...);
 void fatal(const char *fmt, ...);
 
-/* Files and paths. */
+/* Files. Paths and directories are in platform.h. */
 char *read_file(const char *path, size_t *len_out);
 bool write_file(const char *path, const char *data, size_t len);
-bool file_exists(const char *path);
-bool dir_exists(const char *path);
-char *path_join(const char *a, const char *b);
-char *path_dirname(const char *path);
-char *path_realpath(const char *path); /* NULL if missing */
-bool make_dirs(const char *path);
 
 #endif

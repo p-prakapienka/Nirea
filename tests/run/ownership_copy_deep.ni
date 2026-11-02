@@ -8,12 +8,17 @@ struct Engine {
 struct Vehicle {
     String name;
     Engine engine;
-    int[2] wheels;
-    Engine[2] spares;
+    int[] wheels;
+    Engine[] spares;
+
+    Vehicle() {
+        wheels = int[2];
+        spares = Engine[2];
+    }
 }
 
 void main() {
-    Vehicle original;
+    Vehicle original = Vehicle();
     original.name = "first";
     original.engine.power = 100;
     original.wheels[0] = 1;

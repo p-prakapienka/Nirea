@@ -10,7 +10,7 @@ struct Vehicle {
 }
 
 void main() {
-    Vehicle vehicle;
+    Vehicle vehicle = Vehicle();
     Engine* engine = vehicle.engine;
     println(vehicle.engine.power);
     engine.power = 1; // error: the reference ended

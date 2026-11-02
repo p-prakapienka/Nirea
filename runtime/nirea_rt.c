@@ -24,6 +24,31 @@ static void *checked_realloc(void *ptr, size_t size) {
     return p;
 }
 
+/* ---- Arrays ---- */
+
+void *nr_array_alloc(int64_t count, size_t elem_size, const char *loc) {
+    if (count == 0) return NULL;
+    if (elem_size != 0 && (uint64_t)count > SIZE_MAX / elem_size) nr_panic("out of memory", loc);
+    void *p = calloc((size_t)count, elem_size ? elem_size : 1);
+    if (!p) nr_panic("out of memory", loc);
+    return p;
+}
+
+void nr_array_free(void *elements) {
+    free(elements);
+}
+
+int64_t nr_array_size_i64(int64_t n, const char *loc) {
+    if (n < 0) nr_panic("negative array length", loc);
+    if (n > INT32_MAX) nr_panic("array length above 2147483647", loc);
+    return n;
+}
+
+int64_t nr_array_size_u64(uint64_t n, const char *loc) {
+    if (n > INT32_MAX) nr_panic("array length above 2147483647", loc);
+    return (int64_t)n;
+}
+
 /* ---- Formatting ---- */
 
 /* Formats a floating-point value in the shortest form that reads back as the

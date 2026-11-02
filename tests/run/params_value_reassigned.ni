@@ -5,14 +5,14 @@ struct Engine {
 }
 
 int replaced(Engine engine) {
-    Engine fresh;
+    Engine fresh = Engine();
     fresh.power = 9;
     engine = fresh;
     return engine.power;
 }
 
 void main() {
-    Engine engine;
+    Engine engine = Engine();
     engine.power = 1;
     println(replaced(engine));        // expect: 9
 }

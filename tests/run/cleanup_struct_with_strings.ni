@@ -3,9 +3,10 @@
 
 struct Person {
     String name;
-    String[2] tags;
+    String[] tags;
 
     Person(String name) {
+        tags = String[2];
         this.name = name;
         tags[0] = "a";
         tags[1] = "b";
@@ -26,7 +27,7 @@ void main() {
     println(second.name);                // expect: 1x
     first = make(2);
     println(first.tags[1]);              // expect: b2
-    Person[2] people = {make(3), make(4)};
+    Person[] people = {make(3), make(4)};
     people[0] = make(5);
     println(people[0].name);             // expect: 5
     println(make(6).name);               // expect: 6
