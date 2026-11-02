@@ -220,6 +220,70 @@ A reference (`T*`) works on an existing object in place, without owning it. Besi
 - An object can be reached in only one way at a time. Reaching it through its owner, or through a new reference, ends the old reference.
 - A call can't reach the same object twice through its reference parameters.
 
+A reference variable gives a short name to an object, wherever it is, without copying it:
+
+```nirea
+interface Shape {
+    int area();
+}
+
+struct Square : Shape {
+    int side;
+
+    int area() {
+        return side * side;
+    }
+}
+
+struct Engine {
+    int power;
+}
+
+struct Vehicle {
+    Engine engine;
+    int speed;
+}
+
+struct Garage {
+    Vehicle[] vehicles;
+
+    Garage(int size) {
+        vehicles = Vehicle[size];
+    }
+}
+
+void tune(Engine* engine) {                  // a reference parameter
+    engine.power = engine.power + 10;
+}
+
+void main() {
+    Garage garage = Garage(3);
+
+    Engine* engine = garage.vehicles[1].engine;  // a short name for a nested object
+    engine.power = 100;
+    tune(engine);                            // passing it on keeps it usable
+    println(engine.power);                   // 110
+    Engine spare = engine.copy();            // an independent copy
+
+    for (int i = 0; i < garage.vehicles.length; i++) {
+        Vehicle* vehicle = garage.vehicles[i];   // a new reference on every iteration
+        vehicle.speed = (i + 1) * 10;
+    }
+    println(garage.vehicles[2].speed);       // 30
+    println(spare.power);                    // 110
+
+    String name = "Rover";
+    String* text = name;                     // strings work the same way
+    text.append(" 2");
+    println(name);                           // Rover 2
+
+    Square square = Square();
+    square.side = 4;
+    Shape* shape = square;                   // a reference to an interface
+    println(shape.area());                   // 16
+}
+```
+
 Methods that return `this` let calls be chained:
 
 ```nirea
@@ -317,6 +381,8 @@ The compiler rejects references that could outlive their object or reach it in t
 
 ```nirea
 Engine* engine = vehicle.engine;
+Engine owned = engine;                   // error: a reference doesn't own its object; use engine.copy()
+engine = other.engine;                   // error: a reference is set when it is declared
 vehicle.speed = 50;                      // speed isn't part of the engine
 engine.power = 120;
 println(vehicle.engine.power);           // reaches the engine through vehicle: engine ends
