@@ -973,6 +973,7 @@ Resolution:
 - Imports aren't transitive: a file sees its own declarations and the declarations of the files it imports directly.
 - Importing the same file again has no further effect. Circular imports are allowed.
 - Every `.ni` file under the source root is part of the program, and top-level names must be unique across the whole program.
+- A relative path can lead outside the source root, for example to a file shared by several projects. A file outside the source root is part of the program only when a file of the program imports it.
 
 ## 13. Native compilation
 
