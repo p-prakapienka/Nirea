@@ -441,6 +441,30 @@ Options:
 - `--cc COMPILER` selects the C compiler. The default is `$CC`, then `cc`; on Windows, `$CC`, then `gcc`, then `clang`.
 - `-lLIB` and `-LDIR` are passed to the C compiler, for example to link C libraries used through `extern "C"`.
 
+### On Windows
+
+Executables get `.exe`, and paths can use `\`. In Command Prompt:
+
+```bat
+REM build and run a single file
+build\nirea.exe run Hello.ni
+
+REM build Hello.exe in the current folder, then run it
+build\nirea.exe build Hello.ni
+Hello.exe
+
+REM build bin\hello.exe
+build\nirea.exe build Hello.ni -o bin\hello
+
+REM build a project into C:\projects\garden\target\nirea-app.exe
+build\nirea.exe build C:\projects\garden
+
+REM use Clang instead of GCC for one build
+build\nirea.exe run Hello.ni --cc clang
+```
+
+PowerShell takes the same commands without the `REM` lines, except that a program in the current folder is run as `.\Hello.exe`. To use Clang for every build, set `CC`: `set CC=clang` in Command Prompt, or `$env:CC = "clang"` in PowerShell. To call the compiler as just `nirea`, add the `build` folder to `PATH`, for example with `set PATH=%CD%\build;%PATH%` in Command Prompt.
+
 ## Documentation
 
 - [Language design specification](docs/language-design.md) (v0.12, preliminary)
