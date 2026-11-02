@@ -979,8 +979,28 @@ static void parse_decl(Parser *p, Decl *ns, DeclVec *out) {
     TypeExpr *te = parse_return_type(p);
     bool ret_is_ref = accept(p, TOK_STAR);
     Token *name = expect(p, TOK_IDENT);
+    if (at(p, TOK_ASSIGN) && !ret_is_ref && !te->is_void) {
+        /* a global object (spec 5.6); its initial value comes from a function
+         * that returns the initialiser, so it is checked like any return */
+        Token *assign = next(p);
+        Decl *g = new_decl(p, D_GLOBAL, name->text, name->loc, ns);
+        g->field_type_expr = te;
+        Decl *init = new_decl(p, D_FUNC, name->text, assign->loc, ns);
+        init->ret_expr = te;
+        init->global_of = g;
+        Stmt *ret = new_stmt(S_RETURN, assign->loc);
+        ret->expr = parse_expr(p);
+        check_no_nested_assignment(p);
+        expect(p, TOK_SEMI);
+        init->body = new_stmt(S_BLOCK, assign->loc);
+        vec_push(init->body->stmts, ret);
+        g->init_fn = init;
+        vec_push(*out, g);
+        return;
+    }
     if (at(p, TOK_ASSIGN) || at(p, TOK_SEMI)) {
-        fail_at(p, name->loc, "global variables aren't supported; use a constant ('const') or a local variable");
+        fail_at(p, name->loc, "global variables need a struct type and an initialiser, as in Store STORE = Store(); "
+                              "use a constant ('const') for other values");
     }
     Decl *fn = new_decl(p, D_FUNC, name->text, name->loc, ns);
     fn->ret_expr = te;

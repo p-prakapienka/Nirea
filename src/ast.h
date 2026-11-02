@@ -119,6 +119,7 @@ typedef enum ExprKind {
     E_FIELD,       /* base.field */
     E_ENUM_VALUE,  /* Enum.VALUE */
     E_CONST,       /* reference to a constant */
+    E_GLOBAL,      /* a global object (decl), only as the object a method is called on */
     E_CALL_FUNC,   /* free function or extern function */
     E_CALL_METHOD, /* base.method(args), static dispatch */
     E_CALL_IFACE,  /* base.method(args) through an interface reference */
@@ -266,6 +267,7 @@ typedef enum DeclKind {
     D_METHOD,
     D_CTOR,
     D_IFACE_METHOD,
+    D_GLOBAL, /* global object (spec 5.6) */
 } DeclKind;
 
 typedef struct ImportDecl {
@@ -328,6 +330,12 @@ struct Decl {
     TypeExpr *const_type_expr;
     Type *const_type;
     Expr *const_value;
+
+    /* global objects (spec 5.6): the type is field_type */
+    Decl *init_fn;    /* global object: a function returning its initial value */
+    Decl *global_of;  /* that function: its global object */
+    int global_index; /* global object: index in Program.all_globals */
+    void *reach;      /* functions: the global objects they can reach (ownership.c) */
 };
 
 /* True for a call whose result is a reference rather than a new object
@@ -346,6 +354,8 @@ typedef struct Program {
     DeclVec all_functions; /* free functions, methods, constructors */
     DeclVec all_externs;
     DeclVec all_consts;
+    DeclVec all_globals;
+    DeclVec global_order; /* creation order (spec 5.6) */
     VEC(Type *) array_types;
     Decl *main;
 } Program;

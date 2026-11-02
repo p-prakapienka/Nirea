@@ -231,6 +231,10 @@ static void assign_names(Program *prog) {
         Decl *d = prog->all_externs.data[i];
         d->cname = d->name;
     }
+    for (int i = 0; i < prog->all_globals.len; i++) {
+        Decl *d = prog->all_globals.data[i];
+        d->cname = fmt_str("nr_g%d_%s", d->id, d->name);
+    }
 }
 
 static const char *vtable_name(Decl *s, Decl *iface) {
@@ -345,7 +349,8 @@ static bool is_place(Expr *e) {
     case E_VAR:
     case E_THIS:
     case E_INDEX:
-    case E_FIELD: return true;
+    case E_FIELD:
+    case E_GLOBAL: return true;
     default: return false;
     }
 }
@@ -357,6 +362,7 @@ static const char *gen_place(CG *cg, Expr *e) {
     switch (e->kind) {
     case E_VAR: return var_ref(e->var);
     case E_THIS: return "(*nr_self)";
+    case E_GLOBAL: return e->decl->cname;
     case E_FIELD: {
         const char *base = is_place(e->base) ? gen_place(cg, e->base) : gen_expr(cg, e->base);
         return fmt_str("%s.%s", base, field_name(e->decl));
@@ -1422,6 +1428,13 @@ char *codegen_program(Program *prog) {
     }
     emit(&cg, "");
 
+    /* Global objects (spec 5.6). */
+    for (int i = 0; i < prog->all_globals.len; i++) {
+        Decl *g = prog->all_globals.data[i];
+        emit(&cg, "static %s %s;", ctype(g->field_type), g->cname);
+    }
+    emit(&cg, "");
+
     /* Interface thunks and vtable instances. */
     for (int i = 0; i < prog->all_structs.len; i++) {
         Decl *s = prog->all_structs.data[i];
@@ -1453,14 +1466,34 @@ char *codegen_program(Program *prog) {
 
     for (int i = 0; i < prog->all_functions.len; i++) gen_function(&cg, prog->all_functions.data[i]);
 
+    /* Global objects are created before main, in dependency order, and
+     * destroyed after it in reverse order (spec 5.6). */
+    emit(&cg, "static void nr_create_globals(void) {");
+    for (int i = 0; i < prog->global_order.len; i++) {
+        Decl *g = prog->global_order.data[i];
+        emit(&cg, "    %s = %s();", g->cname, g->init_fn->cname);
+    }
+    emit(&cg, "}");
+    emit(&cg, "static void nr_destroy_globals(void) {");
+    for (int i = prog->global_order.len - 1; i >= 0; i--) {
+        Decl *g = prog->global_order.data[i];
+        if (needs_drop(g->field_type)) emit(&cg, "    %s", drop_stmt(g->field_type, g->cname));
+    }
+    emit(&cg, "}");
+    emit(&cg, "");
+
     emit(&cg, "int main(int argc, char **argv) {");
     emit(&cg, "    (void)argc;");
     emit(&cg, "    (void)argv;");
+    emit(&cg, "    nr_create_globals();");
     if (prog->main->ret_type == type_void) {
         emit(&cg, "    %s();", prog->main->cname);
+        emit(&cg, "    nr_destroy_globals();");
         emit(&cg, "    return 0;");
     } else {
-        emit(&cg, "    return (int)%s();", prog->main->cname);
+        emit(&cg, "    int nr_status = (int)%s();", prog->main->cname);
+        emit(&cg, "    nr_destroy_globals();");
+        emit(&cg, "    return nr_status;");
     }
     emit(&cg, "}");
     return out.data;

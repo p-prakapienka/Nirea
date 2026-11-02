@@ -51,6 +51,7 @@ static const char *decl_kind_name(Decl *d) {
     case D_METHOD: return "method";
     case D_CTOR: return "constructor";
     case D_IFACE_METHOD: return "interface method";
+    case D_GLOBAL: return "global object";
     }
     return "declaration";
 }
@@ -346,6 +347,11 @@ static void collect_decl(Program *prog, Decl *d) {
     case D_FUNC: vec_push(prog->all_functions, d); break;
     case D_EXTERN_FUNC: vec_push(prog->all_externs, d); break;
     case D_CONST: vec_push(prog->all_consts, d); break;
+    case D_GLOBAL:
+        d->global_index = prog->all_globals.len;
+        vec_push(prog->all_globals, d);
+        collect_decl(prog, d->init_fn); /* an ordinary function, which no name refers to */
+        break;
     case D_NAMESPACE: {
         const char *container = fmt_str("namespace '%s'", d->name);
         for (int i = 0; i < d->members.len; i++) {
@@ -716,6 +722,10 @@ static void resolve_name(Ctx *ctx, Expr *e) {
         e->kind = E_CONST;
         e->type = d->const_type ? d->const_type : type_error;
         return;
+    case D_GLOBAL:
+        e->kind = E_GLOBAL;
+        e->type = d->field_type ? d->field_type : type_error;
+        return;
     case D_NAMESPACE: e->kind = E_NAMESPACE_REF; break;
     case D_STRUCT:
     case D_ENUM:
@@ -747,6 +757,10 @@ static void member_of_decl(Ctx *ctx, Expr *e, Decl *container) {
         case D_CONST:
             e->kind = E_CONST;
             e->type = d->const_type ? d->const_type : type_error;
+            return;
+        case D_GLOBAL:
+            e->kind = E_GLOBAL;
+            e->type = d->field_type ? d->field_type : type_error;
             return;
         case D_STRUCT:
         case D_ENUM:
@@ -818,6 +832,13 @@ static void resolve_path(Ctx *ctx, Expr *e) {
     }
     if (bt->kind == TY_STRUCT) {
         Decl *m = map_get(&bt->decl->member_map, e->name);
+        if (m && m->kind == D_FIELD && base->kind == E_GLOBAL) {
+            error_at(e->loc, "the fields of global object '%s' can't be used through its name; call one of its methods",
+                     base->decl->name);
+            e->kind = E_FIELD;
+            e->type = type_error;
+            return;
+        }
         if (m && m->kind == D_FIELD) {
             check_private(ctx, m, e->loc);
             e->kind = E_FIELD;
@@ -1037,6 +1058,11 @@ static Type *call_method_on(Ctx *ctx, Expr *e, Expr *receiver, const char *name,
         for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
         return set_type(e, type_error);
     }
+    if (receiver->kind == E_GLOBAL && (name == name_copy || name == name_equals)) {
+        error_at(loc, "global object '%s' can't be copied or compared; call one of its methods", receiver->decl->name);
+        for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
+        return set_type(e, type_error);
+    }
     if (name == name_copy && type_is_owned(rt)) {
         e->kind = E_COPY;
         e->base = receiver;
@@ -1070,6 +1096,10 @@ static Type *call_method_on(Ctx *ctx, Expr *e, Expr *receiver, const char *name,
             return set_type(e, type_error);
         }
         check_private(ctx, m, loc);
+        if (receiver->kind == E_GLOBAL && m->ret_is_ref) {
+            error_at(loc, "'%s' returns a reference, so it can't be called on global object '%s'; return a copy instead",
+                     name, receiver->decl->name);
+        }
         e->kind = E_CALL_METHOD;
         e->base = receiver;
         e->decl = m;
@@ -1519,6 +1549,11 @@ static Type *check_expr(Ctx *ctx, Expr *e, Type *expected) {
 
 static Type *check_value(Ctx *ctx, Expr *e, Type *expected) {
     Type *t = check_expr(ctx, e, expected);
+    if (e->kind == E_GLOBAL) {
+        error_at(e->loc, "global object '%s' can only be used to call its methods, as in %s.method()", e->decl->name,
+                 e->decl->name);
+        return set_type(e, type_error);
+    }
     if (is_decl_ref(e)) {
         if (e->decl) {
             Decl *d = e->decl;
@@ -2347,6 +2382,20 @@ void sema_check_program(Program *prog) {
     for (int i = 0; i < prog->all_externs.len; i++) resolve_signature(prog, prog->all_externs.data[i]);
     check_struct_cycles(prog);
     check_implementations(prog);
+    for (int i = 0; i < prog->all_globals.len; i++) {
+        Decl *g = prog->all_globals.data[i];
+        Ctx ctx = {0};
+        ctx.prog = prog;
+        ctx.file = g->file;
+        ctx.ns = g->ns;
+        g->field_type = resolve_type(&ctx, g->field_type_expr, false, "a global object");
+        if (!is_error(g->field_type) && g->field_type->kind != TY_STRUCT) {
+            error_at(g->field_type_expr->loc, "a global object must have a struct type, not %s; use a constant ('const') for "
+                                              "other values",
+                     type_name(g->field_type));
+            g->field_type = type_error;
+        }
+    }
 
     Decl *main_fn = map_get(&prog->globals, name_main);
     if (!main_fn || main_fn->kind != D_FUNC) {

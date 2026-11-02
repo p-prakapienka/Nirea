@@ -57,7 +57,199 @@ typedef struct OCtx {
     const char **end_reason; /* why it ended */
     PathVec *targets;        /* objects each reference variable reaches */
     VarVec refs;             /* the function's reference variables */
+    uint8_t *self_globals;   /* in methods: the global objects `this` may be (spec 9.3) */
 } OCtx;
+
+/* ---- Global objects (spec 5.6, 9.3) ---- */
+
+/* The global objects a function can reach: by calling a method on them by
+ * name, or through the functions it calls. For each one, where it is first
+ * reached, and through which called function (NULL if by name). */
+typedef struct GlobalReach {
+    uint8_t *bits;
+    Loc *loc;
+    Decl **via;
+    DeclVec callees;
+    VEC(Loc) callee_locs;
+} GlobalReach;
+
+static Program *program;
+
+static GlobalReach *reach_of(Decl *fn) {
+    return fn ? (GlobalReach *)fn->reach : NULL;
+}
+
+static void add_callee(GlobalReach *r, Decl *callee, Loc loc) {
+    if (!callee || !callee->reach) return;
+    vec_push(r->callees, callee);
+    vec_push(r->callee_locs, loc);
+}
+
+/* A call through an interface can run any implementation of the method. */
+static void add_implementations(GlobalReach *r, Decl *im, Loc loc) {
+    for (int i = 0; i < program->all_structs.len; i++) {
+        Decl *s = program->all_structs.data[i];
+        for (int j = 0; j < s->implements.len; j++) {
+            if (s->implements.data[j].decl != im->owner) continue;
+            Decl *m = map_get(&s->member_map, im->name);
+            if (m && m->kind == D_METHOD) add_callee(r, m, loc);
+        }
+    }
+}
+
+static void collect_reach_stmt(GlobalReach *r, Stmt *s);
+
+static void collect_reach_expr(GlobalReach *r, Expr *e) {
+    if (!e) return;
+    switch (e->kind) {
+    case E_GLOBAL: {
+        int g = e->decl->global_index;
+        if (!r->bits[g]) {
+            r->bits[g] = 1;
+            r->loc[g] = e->loc;
+        }
+        break;
+    }
+    case E_CALL_FUNC:
+    case E_CALL_METHOD: add_callee(r, e->decl, e->loc); break;
+    case E_CALL_CTOR: add_callee(r, e->decl->ctor, e->loc); break;
+    case E_CALL_IFACE: add_implementations(r, e->decl, e->loc); break;
+    default: break;
+    }
+    collect_reach_expr(r, e->base);
+    collect_reach_expr(r, e->index);
+    for (int i = 0; i < e->args.len; i++) collect_reach_expr(r, e->args.data[i]);
+    if (e->sw) {
+        collect_reach_expr(r, e->sw->subject);
+        for (int i = 0; i < e->sw->arms.len; i++) collect_reach_expr(r, e->sw->arms.data[i].expr);
+    }
+}
+
+static void collect_reach_stmt(GlobalReach *r, Stmt *s) {
+    if (!s) return;
+    for (int i = 0; i < s->stmts.len; i++) collect_reach_stmt(r, s->stmts.data[i]);
+    collect_reach_expr(r, s->init);
+    collect_reach_expr(r, s->expr);
+    collect_reach_expr(r, s->value);
+    collect_reach_stmt(r, s->then_branch);
+    collect_reach_stmt(r, s->else_branch);
+    collect_reach_stmt(r, s->body);
+    collect_reach_stmt(r, s->for_init);
+    collect_reach_stmt(r, s->for_update);
+    if (s->sw) {
+        collect_reach_expr(r, s->sw->subject);
+        for (int i = 0; i < s->sw->arms.len; i++) collect_reach_stmt(r, s->sw->arms.data[i].body);
+    }
+}
+
+static const char *function_desc(Decl *fn) {
+    if (fn->global_of) return fmt_str("the initialiser of '%s'", fn->global_of->name);
+    if (fn->kind == D_CTOR) return fmt_str("the constructor of '%s'", fn->owner->name);
+    if (fn->owner) return fmt_str("'%s.%s'", fn->owner->name, fn->name);
+    return fmt_str("'%s'", fn->name);
+}
+
+/* Explains, with notes, how fn reaches global object g. */
+static void note_reach_chain(Decl *fn, int g) {
+    Decl *global = program->all_globals.data[g];
+    for (int depth = 0; fn && depth < 100; depth++) {
+        GlobalReach *r = reach_of(fn);
+        if (!r->via[g]) {
+            note_at(r->loc[g], "%s uses '%s' here", function_desc(fn), global->name);
+            return;
+        }
+        note_at(r->loc[g], "%s calls %s here", function_desc(fn), function_desc(r->via[g]));
+        fn = r->via[g];
+    }
+}
+
+/* Works out, for every function, the global objects it can reach. */
+static void compute_reach(Program *prog) {
+    int n = prog->all_globals.len;
+    for (int i = 0; i < prog->all_functions.len; i++) {
+        GlobalReach *r = NEW(GlobalReach);
+        r->bits = xcalloc((size_t)(n ? n : 1), 1);
+        r->loc = xcalloc((size_t)(n ? n : 1), sizeof(Loc));
+        r->via = xcalloc((size_t)(n ? n : 1), sizeof(Decl *));
+        prog->all_functions.data[i]->reach = r;
+    }
+    for (int i = 0; i < prog->all_functions.len; i++) {
+        Decl *fn = prog->all_functions.data[i];
+        collect_reach_stmt(reach_of(fn), fn->body);
+    }
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (int i = 0; i < prog->all_functions.len; i++) {
+            GlobalReach *r = reach_of(prog->all_functions.data[i]);
+            for (int k = 0; k < r->callees.len; k++) {
+                GlobalReach *c = reach_of(r->callees.data[k]);
+                for (int g = 0; g < n; g++) {
+                    if (!c->bits[g] || r->bits[g]) continue;
+                    r->bits[g] = 1;
+                    r->loc[g] = r->callee_locs.data[k];
+                    r->via[g] = r->callees.data[k];
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+
+/* True if a call can reach global object g; *via is the function that does,
+ * or NULL if the call is made on g by name. */
+static bool call_reaches(Expr *call, int g, Decl **via) {
+    *via = NULL;
+    switch (call->kind) {
+    case E_CALL_METHOD:
+        if (call->base->kind == E_GLOBAL && call->base->decl->global_index == g) return true;
+        /* fall through */
+    case E_CALL_FUNC: *via = call->decl; break;
+    case E_CALL_CTOR: *via = call->decl->ctor; break;
+    case E_CALL_IFACE:
+        for (int i = 0; i < program->all_structs.len; i++) {
+            Decl *s = program->all_structs.data[i];
+            for (int j = 0; j < s->implements.len; j++) {
+                if (s->implements.data[j].decl != call->decl->owner) continue;
+                Decl *m = map_get(&s->member_map, call->decl->name);
+                if (m && reach_of(m) && reach_of(m)->bits[g]) {
+                    *via = m;
+                    return true;
+                }
+            }
+        }
+        return false;
+    default: return false;
+    }
+    return *via && reach_of(*via) && reach_of(*via)->bits[g];
+}
+
+/* Global objects are created in dependency order; an initialiser that can
+ * reach its own global object, directly or through others, is an error
+ * (spec 5.6). */
+static void order_globals(Program *prog, int g, uint8_t *state) {
+    if (state[g] == 2) return;
+    Decl *global = prog->all_globals.data[g];
+    if (state[g] == 1) {
+        if (reach_of(global->init_fn)->bits[g]) {
+            error_at(global->loc, "global object '%s' can't be created: its initialiser can reach '%s' itself", global->name,
+                     global->name);
+            note_reach_chain(global->init_fn, g);
+        } else {
+            error_at(global->loc,
+                     "global object '%s' can't be created: the global objects its initialiser reaches need '%s' first",
+                     global->name, global->name);
+        }
+        state[g] = 2;
+        return;
+    }
+    state[g] = 1;
+    GlobalReach *r = reach_of(global->init_fn);
+    for (int h = 0; h < prog->all_globals.len; h++) {
+        if (r->bits[h]) order_globals(prog, h, state);
+    }
+    if (state[g] == 1) vec_push(prog->global_order, global);
+    state[g] = 2;
+}
 
 static State state_new(OCtx *c, bool reachable) {
     State s;
@@ -459,6 +651,65 @@ static void check_call_reach(OCtx *c, Expr *e) {
     free(reaches.data);
 }
 
+/* How a call reaches global object g, as text for a note. */
+static const char *reach_chain_text(Decl *via, int g) {
+    Decl *global = program->all_globals.data[g];
+    if (!via) return fmt_str("it is made on '%s'", global->name);
+    StrBuf sb = {0};
+    sb_append(&sb, function_desc(via));
+    Decl *fn = via;
+    for (int depth = 0; fn && depth < 100; depth++) {
+        Decl *next = reach_of(fn)->via[g];
+        if (!next) {
+            sb_printf(&sb, " uses '%s'", global->name);
+            break;
+        }
+        sb_printf(&sb, " calls %s, which", function_desc(next));
+        fn = next;
+    }
+    return sb_cstr(&sb);
+}
+
+/* Inside the methods of a struct type that has global objects, `this` may be
+ * one of them. A call that can reach it can't receive a reference into its
+ * state, and ends the reference variables into it (spec 9.3). */
+static void check_global_reach(OCtx *c, Expr *e, State *s) {
+    if (!c->self_globals || !s->reachable) return;
+    for (int g = 0; g < program->all_globals.len; g++) {
+        Decl *via;
+        if (!c->self_globals[g] || !call_reaches(e, g, &via)) continue;
+        Decl *global = program->all_globals.data[g];
+        for (int i = -1; i < e->args.len && error_suppress == 0; i++) {
+            Expr *arg;
+            if (i < 0) {
+                if (!has_receiver(e)) continue;
+                arg = e->base;
+                if (arg->kind == E_THIS && e->kind == E_CALL_METHOD) continue; /* one of its own methods */
+            } else {
+                if (!passed_by_reference(e, i)) continue;
+                arg = e->args.data[i];
+            }
+            PathVec paths = {0};
+            bool into = place_paths(c, arg, &paths);
+            bool found = false;
+            for (int k = 0; into && k < paths.len; k++) found = found || paths.data[k].root == NULL;
+            free(paths.data);
+            if (!found) continue;
+            error_at(arg->loc,
+                     "this call can reach global object '%s' while %s refers into it, which could leave the reference "
+                     "pointing at replaced memory; pass a copy (.copy()) instead",
+                     global->name, i < 0 ? "the object it is called on" : "this argument");
+            if (via) note_reach_chain(via, g);
+            else note_at(e->loc, "the call is made on '%s' itself", global->name);
+        }
+        PathVec self = {0};
+        vec_push(self, path_root(NULL));
+        end_overlapping(c, s, &self, NULL, e->loc,
+                        fmt_str("this call can reach global object '%s': %s", global->name, reach_chain_text(via, g)));
+        free(self.data);
+    }
+}
+
 static void visit_call(OCtx *c, Expr *e, State *s) {
     PendingVec pending = {0};
     if (has_receiver(e)) visit_operand(c, e->base, s, &pending);
@@ -479,6 +730,7 @@ static void visit_call(OCtx *c, Expr *e, State *s) {
     free(before_arg);
     free(after_receiver.v);
     check_call_reach(c, e);
+    check_global_reach(c, e, s);
     for (int i = 0; i < pending.len; i++) {
         Pending *p = &pending.data[i];
         end_overlapping(c, s, &p->paths, p->via, p->loc, fmt_str("%s is used", p->paths.data[0].text));
@@ -715,6 +967,13 @@ static void check_function(Decl *fn) {
     for (int i = 0; i < fn->locals.len; i++) {
         if (is_ref_var(fn->locals.data[i])) vec_push(c.refs, fn->locals.data[i]);
     }
+    if (fn->kind == D_METHOD) {
+        for (int g = 0; g < program->all_globals.len; g++) {
+            if (program->all_globals.data[g]->field_type != fn->owner->type) continue;
+            if (!c.self_globals) c.self_globals = xcalloc((size_t)program->all_globals.len, 1);
+            c.self_globals[g] = 1;
+        }
+    }
     State s = state_new(&c, true);
     visit_stmt(&c, fn->body, &s);
     free(s.v);
@@ -724,8 +983,14 @@ static void check_function(Decl *fn) {
     for (int i = 0; i < c.n; i++) free(c.targets[i].data);
     free(c.targets);
     free(c.refs.data);
+    free(c.self_globals);
 }
 
 void ownership_check_program(Program *prog) {
+    program = prog;
+    compute_reach(prog);
+    uint8_t *state = xcalloc((size_t)(prog->all_globals.len ? prog->all_globals.len : 1), 1);
+    for (int g = 0; g < prog->all_globals.len; g++) order_globals(prog, g, state);
+    free(state);
     for (int i = 0; i < prog->all_functions.len; i++) check_function(prog->all_functions.data[i]);
 }
