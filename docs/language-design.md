@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.12 — Arrays sized when created
+**Version:** 0.13 — Global objects
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Version 0.11 requires local variables to be assigned before they are used (§6.8). Version 0.12 makes arrays Java-style: the type `T[]` has no size, and an array's length is fixed when it is created with `T[n]` (§6.6). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Version 0.11 requires local variables to be assigned before they are used (§6.8). Version 0.12 makes arrays Java-style: the type `T[]` has no size, and an array's length is fixed when it is created with `T[n]` (§6.6). Version 0.13 adds global objects, struct values that belong to the program and are used through their methods (§5.6, §9.3). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -66,6 +66,7 @@ Nirea follows familiar Java naming conventions.
 | Function  | camelCase        | `calculateDistance()` |
 | Variable  | camelCase        | `sampleRate`          |
 | Constant  | UPPER_SNAKE_CASE | `MAX_BUFFER_SIZE`     |
+| Global object | UPPER_SNAKE_CASE | `USERS`         |
 
 ## 5. Basic syntax
 
@@ -224,7 +225,60 @@ const String APP_NAME = "Nirea";
 
 A constant has a primitive, enum or `String` type. Its initialiser is a literal, a negated numeric literal or an enum value. A `String` constant is a named literal: each use creates a new `String` object, like writing the literal (§6.5).
 
-There are no global variables. Mutable state lives in local variables and in the values they own.
+There are no global variables. Mutable state lives in local variables, in the values they own, and in global objects (§5.6).
+
+### 5.6 Global objects
+
+A global object is a struct value that belongs to the program: it is created before `main` runs and destroyed after `main` returns. It is declared at the top level of a file or inside a namespace, with a struct type and an initialiser, and its name follows the constant convention (§4):
+
+```nirea
+interface Repository {
+    void save(User user);
+    User find(int id);
+}
+
+struct UserStore : Repository {
+    private User[] users;
+    private int count;
+
+    UserStore() {
+        users = User[16];
+    }
+
+    void save(User user) { ... }
+    User find(int id) { ... }
+}
+
+UserStore USERS = UserStore();
+
+void main() {
+    USERS.save(User("Ann"));
+    User ann = USERS.find(1);            // a copy
+}
+```
+
+A global object is used only by calling its methods: `USERS.save(user)`. It can't be used as a value, so it can't be assigned, given to a new owner, copied, compared or passed as an argument, and its fields can't be used through its name, even when they are public. Its methods that return a reference (§9.2) can't be called on it. Inside its methods, its fields are used through `this`, as for any struct value. A struct type with a global object can still have ordinary local values.
+
+To choose an implementation, for example in tests, a global object can forward each call to another one:
+
+```nirea
+struct Users : Repository {
+    void save(User user) {
+        if (SETTINGS.testing()) {
+            FAKE_USERS.save(user);
+        } else {
+            USERS.save(user);
+        }
+    }
+    ...
+}
+
+Users REPOSITORY = Users();
+```
+
+Global objects are created in dependency order: before a global object's initialiser runs, every global object it can reach (§9.3) has been created. An initialiser that can reach its own global object, directly or through others, is an error. They are destroyed after `main` returns, in the reverse order. A runtime error ends the program without destroying them (§6.4).
+
+Global objects are shared by the whole program, so they are the one way to reach an object that isn't passed to a function or owned by it. Section 9.3 describes how the compiler keeps references into them valid. Sharing them between threads is an open question (§18).
 
 ## 6. Types
 
@@ -758,6 +812,37 @@ Arguments for value parameters are copies (§7.3), so they never overlap. This i
 
 Because an object is never reachable through two references in use, replacing an object or giving it to a new owner can't leave a reference to the old object behind.
 
+#### References into global objects
+
+Any function can reach a global object by its name, so a call can reach it again while a reference into it is held, even though nothing in the calling function shows it. If that call replaces part of the global object, for example an array, the reference would be left pointing at freed memory. The compiler prevents this.
+
+The compiler knows which global objects each function can reach: those it calls a method on by name, and those reached by every function it calls, through any chain of calls. A call through an interface can reach whatever any implementation of the method can reach.
+
+Inside the methods of a struct type that has a global object, `this` may be that global object. There, a reference into the object's state is any reference whose object is reached through `this`: a reference variable, a part of `this` used as the object a method is called on, or a part of `this`, or `this` itself, passed to a reference parameter. Two rules apply to such references:
+
+- A call that can reach the global object ends every reference variable into its state, as if the object had been used directly.
+- A call that can reach the global object can't receive a reference into its state, as the object it is called on or as a reference argument. Calling one of the object's own methods on `this` is the exception, since that is the same way to reach it.
+
+```nirea
+struct UserStore {
+    private User[] users;
+
+    void rename(int i, String name) {
+        AUDIT.log("rename");         // ok: no reference into USERS is held
+        users[i].name = name;        // reaches whatever array is there now
+
+        User* user = users[i];
+        AUDIT.log("rename");         // ends user, if AUDIT.log can reach USERS
+        user.name = name;            // error: user has ended
+
+        users[i].rename(name);       // error if User.rename can reach USERS
+        DATABASE.insert(users[i]);   // ok if insert takes a User value: it receives a copy
+    }
+}
+```
+
+Calls that can't reach the global object are unaffected. The error message shows the chain of calls through which a call can reach the global object.
+
 ## 10. Control flow
 
 Nirea retains familiar C/Java-style loops and control statements.
@@ -1182,7 +1267,7 @@ The following decisions require further specification.
 | Modules     | Per-file private declarations, and reopening a namespace in several places                                                                  |
 | ABI         | Native calling conventions and data layouts                                                                                                 |
 | Errors      | Recoverable error handling                                                                                                                  |
-| Concurrency | Ownership and thread-safety rules                                                                                                           |
+| Concurrency | Ownership and thread-safety rules, including access to global objects (§5.6)                                                               |
 | Interfaces  | Owned interface values (variables, fields, return values) and static dispatch                                                               |
 
 ## 19. Development roadmap
@@ -1249,7 +1334,7 @@ Explicit code. Simple abstractions. Native execution. Safety by design.
 
 ## Appendix A. Grammar
 
-This grammar describes the language as specified in version 0.12. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
+This grammar describes the language as specified in version 0.13. `{ x }` means zero or more repetitions, `[ x ]` means optional, and quoted text is a literal token. `//` and `/* */` comments and whitespace may appear between tokens.
 
 ```text
 file           = { import } { topDecl } ;
@@ -1257,7 +1342,8 @@ import         = "import" IMPORT_PATH ";" ;
 topDecl        = namespaceDecl | decl ;
 namespaceDecl  = "namespace" IDENT "{" { decl } "}" ;
 decl           = functionDecl | structDecl | interfaceDecl | enumDecl
-               | constDecl | externBlock ;
+               | constDecl | globalDecl | externBlock ;
+globalDecl     = typeName IDENT "=" expr ";" ;                         (* global object *)
 
 functionDecl   = returnType IDENT "(" [ params ] ")" block ;
 params         = param { "," param } ;
