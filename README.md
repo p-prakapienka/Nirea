@@ -25,6 +25,63 @@ void main() {
 - Ahead-of-time compilation to native code, with direct interoperability with C libraries.
 - A small language core, with further functionality in optional libraries.
 
+## Initialisation
+
+Nothing gets a value implicitly. Objects are created explicitly: a struct with its constructor or `T()`, an array with `T[n]` or from values, a string from a literal. A declaration without an initialiser only declares the variable. It has no value until one is assigned, so declaration and assignment can be split, and the compiler rejects any use before the assignment, on every path. Only struct fields and array elements start at their zero value.
+
+```nirea
+struct Circle {
+    float radius;
+
+    Circle(float radius) {
+        this.radius = radius;
+    }
+}
+
+struct Point {
+    int x;
+    int y;
+}
+
+void main() {
+    Circle circle = Circle(2.0);             // created by its constructor
+    Point origin = Point();                  // no constructor: every field is zero
+    println(origin.x);                       // 0
+
+    Circle chosen;                           // declared, no value yet
+    boolean big = true;
+    if (big) {
+        chosen = Circle(10.0);               // assigned on every path
+    } else {
+        chosen = Circle(1.0);
+    }
+    println(chosen.radius);                  // 10.0
+
+    int count;                               // numbers need a value too
+    count = 3;
+    println(count + 1);                      // 4
+
+    int[] values = int[3];                   // array elements start at zero
+    println(values[2]);                      // 0
+}
+```
+
+Using a variable before it has a value is a compile error:
+
+```nirea
+Circle circle;
+circle.radius = 2.0;                     // error: 'circle' has no value yet
+
+int count;
+count++;                                 // error: 'count' has no value yet
+
+String status;
+if (ready) {
+    status = "ready";
+}
+println(status);                         // error: 'status' may have no value on some path
+```
+
 ## Strings
 
 `String` is a growable, owned string. `+` concatenates, `+=` appends, and `==` compares contents.
