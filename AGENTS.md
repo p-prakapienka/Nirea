@@ -12,11 +12,17 @@ The project is in **Phase 2: Initial compiler** (spec §19). The compiler implem
 
 ```text
 AGENTS.md                  this file
-README.md                  project overview and usage
+README.md                  project overview and quick start
 CMakeLists.txt             build for the compiler and tests
 cmake/embed.cmake          embeds the runtime sources into the compiler
 docs/
-└── language-design.md     language design specification (v0.14, preliminary)
+├── guide/                 the language by example, one page per topic
+│   ├── README.md          contents
+│   └── 01-getting-started.md … 12-windows.md, in reading order
+└── spec/                  language specification (v0.14, preliminary), one file per chapter
+    ├── README.md          version, contents and version history
+    ├── 01-vision.md … 20-identity.md
+    └── grammar.md         Appendix A
 runtime/
 ├── nirea_rt.h             runtime header included by generated C
 └── nirea_rt.c             runtime: printing, strings, runtime errors
@@ -25,7 +31,7 @@ src/                       the compiler, in C11
 ├── driver.c               file loading, imports (§12), invoking the C compiler
 ├── platform.c             paths, directories and processes on POSIX and Windows
 ├── lexer.c                tokens
-├── parser.c               syntax tree (Appendix A)
+├── parser.c               syntax tree (Appendix A, docs/spec/grammar.md)
 ├── ast.h, types.c         syntax tree and semantic types
 ├── sema.c                 name resolution and type checking
 ├── ownership.c            ownership transfers, references and global objects (§5.6, §7, §9)
@@ -50,7 +56,7 @@ ctest --test-dir build -j8 --output-on-failure
 
 Run a single program with `build/nirea run path/to/File.ni`. To see the generated C, use `build/nirea build File.ni -o app --emit-c out/`.
 
-On Windows, configure with `cmake -S . -B build -G "MinGW Makefiles"` and a MinGW-w64 GCC or Clang on `PATH`; the README has the details.
+On Windows, configure with `cmake -S . -B build -G "MinGW Makefiles"` and a MinGW-w64 GCC or Clang on `PATH`; `docs/guide/12-windows.md` has the details.
 
 ### Tests
 
@@ -62,19 +68,28 @@ On Windows, configure with `cmake -S . -B build -G "MinGW Makefiles"` and a MinG
 
 ## The specification is the source of truth
 
-- `docs/language-design.md` defines the language. Read the relevant sections before writing or changing anything about the language: docs, examples or, later, compiler code.
-- Do not invent semantics for anything in §18 (Open design questions). If a task depends on an open question, say so. Either ask, or propose a resolution as an explicit spec change.
-- Appendix A holds the grammar. Keep it in sync with the prose and with the parser.
+- `docs/spec/` defines the language, one file per chapter: `07-ownership.md` holds §7, and so on. Read the relevant sections before writing or changing anything about the language: docs, examples or compiler code.
+- Do not invent semantics for anything in §18 (Open design questions, `18-open-questions.md`). If a task depends on an open question, say so. Either ask, or propose a resolution as an explicit spec change.
+- Appendix A (`grammar.md`) holds the grammar. Keep it in sync with the prose and with the parser.
 
 ## Changing the specification
 
 - Check every proposal against the core principles (§2) and the non-goals (§17). Implicit behaviour, hidden operations, classes, inheritance, garbage collection and user-visible raw pointers contradict the design. Flag any such conflict instead of introducing it quietly.
 - When you resolve an open question, update or remove its row in §18 and every section and example it affects.
 - Keep examples consistent with the naming conventions (§4), the ownership rules (§7) and each other. If an example deliberately shows an error, say so next to it.
-- Update the version and status line at the top for substantive changes.
+- For substantive changes, update the version line in `docs/spec/README.md` and add an entry to its version history.
+- Refer to other sections as `§N.M`, linked to the chapter file and heading, as in `[§9.3](09-references.md#93-reading-and-changing)`. Keep section numbers stable, since code comments and tests refer to them.
 - Keep the British spelling the spec already uses (initialise, organise, behaviour, optimisation).
 - Fence Nirea code with the `nirea` info string. Use `text` for diagrams and directory trees.
 - Keep changes focused: one design decision per change where practical.
+
+## The guide
+
+- `docs/guide/` teaches the language by example, one topic per page, in plain language. It doesn't add rules: the spec decides, and the guide links to it.
+- When a language change affects a topic, update its guide page in the same change.
+- Every complete example (one with `void main`) must compile and run, and the comments on its print lines show what it prints. Fragments that show an error mark the line with `// error: ...`, close to the compiler's message.
+- Pages are numbered in reading order: the file `08-references.md` has the title `# 8. References`. A new page goes where a reader needs it, and the pages after it are renumbered.
+- Each page ends with links to the previous page, the contents and the next page.
 
 ## Nirea code style
 
