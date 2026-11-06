@@ -1,4 +1,4 @@
-# Global objects
+# 9. Global objects
 
 A global object is a struct value that belongs to the whole program, like a Kotlin `object` or a singleton service. It is created before `main` runs and destroyed after `main` returns. It is declared at the top level of a file or in a namespace, and its name is written in UPPER_SNAKE_CASE.
 
@@ -157,4 +157,4 @@ Using global objects from several threads is still an open question.
 
 ---
 
-[← References](references.md) · [Contents](README.md) · [Projects →](projects.md)
+[← 8. References](08-references.md) · [Contents](README.md) · [Projects →](10-projects.md)

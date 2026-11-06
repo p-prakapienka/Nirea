@@ -1,4 +1,4 @@
-# Strings
+# 3. Strings
 
 `String` is a growable, owned string of bytes. `+` concatenates, `+=` appends, and `==` compares contents.
 
@@ -44,7 +44,7 @@ An index outside the string, and text that `toInt`, `toInt64` or `toFloat64` can
 
 ## Strings are objects
 
-A `String` follows the same rules as a struct ([Ownership](ownership.md)): assignment transfers it, `.copy()` copies it, and a value parameter receives a copy. The only difference is the literal: each time `"text"` is evaluated, it creates a new `String`.
+A `String` follows the same rules as a struct ([Ownership](07-ownership.md)): assignment transfers it, `.copy()` copies it, and a value parameter receives a copy. The only difference is the literal: each time `"text"` is evaluated, it creates a new `String`.
 
 ```nirea
 void shout(String text) {                // a value parameter: receives a copy
@@ -70,4 +70,4 @@ void main() {
 
 ---
 
-[← Basics](basics.md) · [Contents](README.md) · [Arrays →](arrays.md)
+[← 2. Basics](02-basics.md) · [Contents](README.md) · [4. Arrays →](04-arrays.md)

@@ -1,4 +1,4 @@
-# Arrays
+# 4. Arrays
 
 Arrays work as in Java. The type `T[]` has no size: the length is fixed when the array is created, with `T[n]` or from a list of values. Elements start at their zero value, `a.length` gives the length, and an index outside the array is a runtime error. Arrays are objects, like structs and strings: assignment transfers them and `.copy()` copies them.
 
@@ -55,9 +55,9 @@ void main() {
 - `T[a][b]` creates `a` rows of `b` elements. The rows are separate arrays, so they can be replaced.
 - An array field starts as an empty array, with length `0`.
 - A struct can hold an array of itself: `struct Node { Node[] children; }`.
-- A reference to an array is written `int[]* values` ([References](references.md)).
+- A reference to an array is written `int[]* values` ([References](08-references.md)).
 - Arrays can't grow. Growable lists are still an open question.
 
 ---
 
-[← Strings](strings.md) · [Contents](README.md) · [Structs and interfaces →](structs.md)
+[← 3. Strings](03-strings.md) · [Contents](README.md) · [5. Structs and interfaces →](05-structs.md)

@@ -1,4 +1,4 @@
-# Windows
+# 12. Windows
 
 Nirea runs on Windows with a MinGW-w64 toolchain: GCC or Clang.
 
@@ -40,4 +40,4 @@ PowerShell takes the same commands without the `REM` lines, except that a progra
 
 ---
 
-[← Calling C](c-interop.md) · [Contents](README.md)
+[← 11. Calling C](11-c-interop.md) · [Contents](README.md)

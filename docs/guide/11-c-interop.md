@@ -1,4 +1,4 @@
-# Calling C
+# 11. Calling C
 
 Nirea code can call C functions directly. Declare them in an `extern "C"` block, at the top level of a file or in a namespace:
 
@@ -36,4 +36,4 @@ The compiler can't check that a declaration matches the real C function, and a w
 
 ---
 
-[← Namespaces and projects](projects.md) · [Contents](README.md) · [Windows →](windows.md)
+[← 10. Namespaces and projects](10-projects.md) · [Contents](README.md) · [12. Windows →](12-windows.md)

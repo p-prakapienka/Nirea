@@ -1,4 +1,4 @@
-# References
+# 8. References
 
 A reference (`T*`) works on an existing object in place, without owning it. Besides parameters, a local variable can be a reference, and a function or method can return one.
 
@@ -227,8 +227,8 @@ Engine* make() {
 }
 ```
 
-[Global objects](global-objects.md) add one more rule for references into a global object.
+[Global objects](09-global-objects.md) add one more rule for references into a global object.
 
 ---
 
-[← Ownership](ownership.md) · [Contents](README.md) · [Global objects →](global-objects.md)
+[← 7. Ownership](07-ownership.md) · [Contents](README.md) · [9. Global objects →](09-global-objects.md)

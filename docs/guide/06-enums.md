@@ -1,4 +1,4 @@
-# Enums
+# 6. Enums
 
 An enum is a set of named values. Its values are written with the enum's name, `Light.RED`, except in the `case` labels of a switch on that enum.
 
@@ -40,4 +40,4 @@ void main() {
 
 ---
 
-[← Structs and interfaces](structs.md) · [Contents](README.md) · [Ownership →](ownership.md)
+[← 5. Structs and interfaces](05-structs.md) · [Contents](README.md) · [7. Ownership →](07-ownership.md)

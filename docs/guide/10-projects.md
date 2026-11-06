@@ -1,4 +1,4 @@
-# Namespaces and projects
+# 10. Namespaces and projects
 
 ## Namespaces
 
@@ -121,4 +121,4 @@ cd garden && nirea run       # the default project is the current directory
 
 ---
 
-[← Global objects](global-objects.md) · [Contents](README.md) · [Calling C →](c-interop.md)
+[← 9. Global objects](09-global-objects.md) · [Contents](README.md) · [11. Calling C →](11-c-interop.md)

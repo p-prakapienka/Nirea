@@ -17,6 +17,8 @@ CMakeLists.txt             build for the compiler and tests
 cmake/embed.cmake          embeds the runtime sources into the compiler
 docs/
 ├── guide/                 the language by example, one page per topic
+│   ├── README.md          contents
+│   └── 01-getting-started.md … 12-windows.md, in reading order
 └── spec/                  language specification (v0.14, preliminary), one file per chapter
     ├── README.md          version, contents and version history
     ├── 01-vision.md … 20-identity.md
@@ -54,7 +56,7 @@ ctest --test-dir build -j8 --output-on-failure
 
 Run a single program with `build/nirea run path/to/File.ni`. To see the generated C, use `build/nirea build File.ni -o app --emit-c out/`.
 
-On Windows, configure with `cmake -S . -B build -G "MinGW Makefiles"` and a MinGW-w64 GCC or Clang on `PATH`; `docs/guide/windows.md` has the details.
+On Windows, configure with `cmake -S . -B build -G "MinGW Makefiles"` and a MinGW-w64 GCC or Clang on `PATH`; `docs/guide/12-windows.md` has the details.
 
 ### Tests
 
@@ -86,6 +88,7 @@ On Windows, configure with `cmake -S . -B build -G "MinGW Makefiles"` and a MinG
 - `docs/guide/` teaches the language by example, one topic per page, in plain language. It doesn't add rules: the spec decides, and the guide links to it.
 - When a language change affects a topic, update its guide page in the same change.
 - Every complete example (one with `void main`) must compile and run, and the comments on its print lines show what it prints. Fragments that show an error mark the line with `// error: ...`, close to the compiler's message.
+- Pages are numbered in reading order: the file `08-references.md` has the title `# 8. References`. A new page goes where a reader needs it, and the pages after it are renumbered.
 - Each page ends with links to the previous page, the contents and the next page.
 
 ## Nirea code style

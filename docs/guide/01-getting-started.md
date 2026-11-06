@@ -1,4 +1,4 @@
-# Getting started
+# 1. Getting started
 
 ## Build the compiler
 
@@ -12,7 +12,7 @@ cmake --build build
 ctest --test-dir build -j8      # optional: run the test suite
 ```
 
-The compiler is `build/nirea`. To call it as just `nirea`, add the `build` folder to your `PATH`. On Windows, see [Windows](windows.md).
+The compiler is `build/nirea`. To call it as just `nirea`, add the `build` folder to your `PATH`. On Windows, see [Windows](12-windows.md).
 
 ## Your first program
 
@@ -41,14 +41,14 @@ nirea build path/to/project     # build a project into target/
 nirea check path/to/project     # check without building
 ```
 
-When you build a single file, the compiler also loads the files it imports. A project keeps its sources in `src/main/nirea`. `nirea build` writes the generated C to `target/generated-c/` and the executable to `target/nirea-app`. Without a file or folder, the commands use the project in the current directory. [Projects](projects.md) explains the layout.
+When you build a single file, the compiler also loads the files it imports. A project keeps its sources in `src/main/nirea`. `nirea build` writes the generated C to `target/generated-c/` and the executable to `target/nirea-app`. Without a file or folder, the commands use the project in the current directory. [Projects](10-projects.md) explains the layout.
 
 Options:
 
 - `-o FILE` sets the executable path.
 - `--emit-c DIR` keeps the generated C in `DIR`.
 - `--cc COMPILER` selects the C compiler. The default is `$CC`, then `cc`; on Windows, `$CC`, then `gcc`, then `clang`.
-- `-lLIB` and `-LDIR` are passed to the C compiler, for example to link C libraries used through `extern "C"` ([Calling C](c-interop.md)).
+- `-lLIB` and `-LDIR` are passed to the C compiler, for example to link C libraries used through `extern "C"` ([Calling C](11-c-interop.md)).
 - `--version` prints the compiler version.
 
 ## Compile errors
@@ -68,4 +68,4 @@ nirea: runtime error: integer overflow at Main.ni:3:8
 
 ---
 
-[Contents](README.md) · [Basics →](basics.md)
+[Contents](README.md) · [2. Basics →](02-basics.md)

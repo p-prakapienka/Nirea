@@ -36,23 +36,23 @@ ctest --test-dir build -j8      # run the test suite
 build/nirea run Hello.ni        # build and run a program
 ```
 
-On Windows, see [Windows](docs/guide/windows.md).
+On Windows, see [Windows](docs/guide/12-windows.md).
 
 ## Documentation
 
 - [The Nirea guide](docs/guide/README.md): the language by example, one topic per page.
-  - [Getting started](docs/guide/getting-started.md)
-  - [Basics](docs/guide/basics.md)
-  - [Strings](docs/guide/strings.md)
-  - [Arrays](docs/guide/arrays.md)
-  - [Structs and interfaces](docs/guide/structs.md)
-  - [Enums](docs/guide/enums.md)
-  - [Ownership](docs/guide/ownership.md)
-  - [References](docs/guide/references.md)
-  - [Global objects](docs/guide/global-objects.md)
-  - [Namespaces and projects](docs/guide/projects.md)
-  - [Calling C](docs/guide/c-interop.md)
-  - [Windows](docs/guide/windows.md)
+  - [1. Getting started](docs/guide/01-getting-started.md)
+  - [2. Basics](docs/guide/02-basics.md)
+  - [3. Strings](docs/guide/03-strings.md)
+  - [4. Arrays](docs/guide/04-arrays.md)
+  - [5. Structs and interfaces](docs/guide/05-structs.md)
+  - [6. Enums](docs/guide/06-enums.md)
+  - [7. Ownership](docs/guide/07-ownership.md)
+  - [8. References](docs/guide/08-references.md)
+  - [9. Global objects](docs/guide/09-global-objects.md)
+  - [10. Namespaces and projects](docs/guide/10-projects.md)
+  - [11. Calling C](docs/guide/11-c-interop.md)
+  - [12. Windows](docs/guide/12-windows.md)
 - [Language specification](docs/spec/README.md) (v0.14, preliminary): the exact rules, one chapter per page.
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors.
 

@@ -1,11 +1,11 @@
-# Ownership
+# 7. Ownership
 
 Nirea has no garbage collector. Instead, every struct, array and `String` has exactly one owner, and is freed automatically when its owner goes out of scope. The compiler checks the rules, so a program can't use an object after it is freed, or free it twice.
 
 - Assignment and `return` transfer ownership. The old variable can't be used afterwards.
 - `.copy()` makes an explicit deep copy, so both stay usable.
 - A value parameter (`Engine engine`) receives a copy automatically. The caller's object is unchanged.
-- A reference parameter (`Engine* engine`) works on the caller's object in place ([References](references.md)).
+- A reference parameter (`Engine* engine`) works on the caller's object in place ([References](08-references.md)).
 
 Numbers, `boolean`, `char` and enum values aren't owned: they are copied like in any other language.
 
@@ -111,4 +111,4 @@ Destructors of your own, for example to close a file, aren't available yet.
 
 ---
 
-[← Enums](enums.md) · [Contents](README.md) · [References →](references.md)
+[← 6. Enums](06-enums.md) · [Contents](README.md) · [8. References →](08-references.md)

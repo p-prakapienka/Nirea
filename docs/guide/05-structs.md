@@ -1,4 +1,4 @@
-# Structs and interfaces
+# 5. Structs and interfaces
 
 Nirea has no classes. Data lives in structs, which have fields and methods. Interfaces describe what a struct can do.
 
@@ -156,4 +156,4 @@ void main() {
 
 ---
 
-[← Arrays](arrays.md) · [Contents](README.md) · [Enums →](enums.md)
+[← 4. Arrays](04-arrays.md) · [Contents](README.md) · [6. Enums →](06-enums.md)

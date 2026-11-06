@@ -1,4 +1,4 @@
-# Basics
+# 2. Basics
 
 ## Variables and types
 
@@ -25,7 +25,7 @@ The primitive types:
 | `uint8`, `uint16`, `uint`, `uint64` | unsigned integers of 8, 16, 32 and 64 bits |
 | `float`, `float64`                  | 32-bit and 64-bit floating point           |
 
-`String`, arrays and structs are objects. They have their own pages: [Strings](strings.md), [Arrays](arrays.md) and [Structs and interfaces](structs.md).
+`String`, arrays and structs are objects. They have their own pages: [Strings](03-strings.md), [Arrays](04-arrays.md) and [Structs and interfaces](05-structs.md).
 
 ## Initialisation
 
@@ -172,7 +172,7 @@ void main() {
 
 ## Switch
 
-A switch can be an expression or a statement. There is no fall-through, and a `case` can list several values. A switch on numbers, characters or strings needs a `default` branch. A switch on an enum must cover every value ([Enums](enums.md)).
+A switch can be an expression or a statement. There is no fall-through, and a `case` can list several values. A switch on numbers, characters or strings needs a `default` branch. A switch on an enum must cover every value ([Enums](06-enums.md)).
 
 ```nirea
 String size(int count) {
@@ -211,11 +211,11 @@ void main() {
 }
 ```
 
-There are no global variables. State lives in local variables, in the objects they own, and in [global objects](global-objects.md).
+There are no global variables. State lives in local variables, in the objects they own, and in [global objects](09-global-objects.md).
 
 ## Printing
 
-`print(value)` and `println(value)` write one value: a number, `boolean`, `char`, enum value or `String`. `println()` prints an empty line. To print several values together, build a string with `+` and `String.of` ([Strings](strings.md)).
+`print(value)` and `println(value)` write one value: a number, `boolean`, `char`, enum value or `String`. `println()` prints an empty line. To print several values together, build a string with `+` and `String.of` ([Strings](03-strings.md)).
 
 ## Comments
 
@@ -223,4 +223,4 @@ There are no global variables. State lives in local variables, in the objects th
 
 ---
 
-[← Getting started](getting-started.md) · [Contents](README.md) · [Strings →](strings.md)
+[← 1. Getting started](01-getting-started.md) · [Contents](README.md) · [3. Strings →](03-strings.md)
