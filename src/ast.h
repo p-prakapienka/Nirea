@@ -89,6 +89,8 @@ struct Var {
     Type *type;
     bool is_ref;        /* reference parameter or variable, written T* (spec 7.3, 9.1) */
     bool ref_to_caller; /* reference variable whose object outlives the function (spec 9.2) */
+    bool changes;       /* reference parameter or variable through which the object is changed (spec 9.3) */
+    Expr *ref_init;     /* reference variable: the object it was declared to refer to */
     int index;          /* per function, for ownership analysis */
     const char *cname;
 };
@@ -336,6 +338,7 @@ struct Decl {
     Decl *global_of;  /* that function: its global object */
     int global_index; /* global object: index in Program.all_globals */
     void *reach;      /* functions: the global objects they can reach (ownership.c) */
+    bool changes_this; /* methods: the body changes this, directly or through calls (spec 9.3) */
 };
 
 /* True for a call whose result is a reference rather than a new object

@@ -1,5 +1,5 @@
-// The object a method is called on and its reference arguments must not
-// overlap: an object and a part of it reach the same memory (§9.3).
+// A call that changes the object it is called on can't also receive a part
+// of it by reference (§9.3).
 
 struct Engine {
     int power;
@@ -16,5 +16,5 @@ struct Vehicle {
 void main() {
     Vehicle vehicle = Vehicle();
     Engine* engine = vehicle.engine;
-    vehicle.install(engine); // error: this call already reaches vehicle.engine
+    vehicle.install(engine); // error: this call changes vehicle (the object it is called on)
 }
