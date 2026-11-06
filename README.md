@@ -399,7 +399,7 @@ Engine* make() {
 
 ## Status
 
-Nirea is at an early stage. The first compiler, `nirea`, implements version 0.12 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.13 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
 
 ## Building the compiler
 
@@ -542,5 +542,5 @@ cd garden && nirea run       # the default project is the current directory
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.12, preliminary)
+- [Language design specification](docs/language-design.md) (v0.13, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors
