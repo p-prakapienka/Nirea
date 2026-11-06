@@ -426,11 +426,14 @@ static bool place_paths(OCtx *c, Expr *e, PathVec *out) {
 
 /* Ends every reference variable other than except that reaches an object
  * overlapping one of paths. */
-static void end_overlapping(OCtx *c, State *s, PathVec *paths, Var *except, Loc loc, const char *reason) {
+/* Ends the reference variables other than except that reach an object
+ * overlapping one of paths: all of them for a change, and only changing ones
+ * for a read, since any number of references can read at once (spec 9.3). */
+static void end_overlapping(OCtx *c, State *s, PathVec *paths, Var *except, bool change, Loc loc, const char *reason) {
     if (!s->reachable) return;
     for (int i = 0; i < c->refs.len; i++) {
         Var *r = c->refs.data[i];
-        if (r == except || s->v[r->index] == GONE) continue;
+        if (r == except || s->v[r->index] == GONE || (!change && !r->changes)) continue;
         if (!any_overlap(&c->targets[r->index], paths, NULL, NULL)) continue;
         s->v[r->index] = GONE;
         if (error_suppress == 0 || !c->end_loc[r->index].file) {
@@ -560,6 +563,7 @@ static void visit_indexes(OCtx *c, Expr *e, Expr *root, State *s) {
 typedef struct Pending {
     PathVec paths;
     Var *via;
+    bool change;
     Loc loc;
 } Pending;
 
@@ -570,7 +574,7 @@ typedef VEC(Pending) PendingVec;
  * expressions are evaluated, and finally the reference variables reaching
  * the object in another way end (spec 9.3), or are added to pending if the
  * place is passed by reference to a call. */
-static void use_place(OCtx *c, Expr *e, State *s, PendingVec *pending) {
+static void use_place(OCtx *c, Expr *e, State *s, PendingVec *pending, bool change) {
     Expr *root = e;
     while (root->kind == E_FIELD || root->kind == E_INDEX || root->kind == E_TO_IFACE) root = root->base;
     Var *via = root->kind == E_VAR && is_ref_var(root->var) ? root->var : NULL;
@@ -589,61 +593,67 @@ static void use_place(OCtx *c, Expr *e, State *s, PendingVec *pending) {
         return;
     }
     if (pending) {
-        Pending p = {paths, via, e->loc};
+        Pending p = {paths, via, change, e->loc};
         vec_push(*pending, p);
         return;
     }
-    end_overlapping(c, s, &paths, via, e->loc, fmt_str("%s is used", paths.data[0].text));
+    end_overlapping(c, s, &paths, via, change, e->loc,
+                    fmt_str("%s is %s", paths.data[0].text, change ? "changed" : "used"));
     free(paths.data);
 }
 
 /* Visits the object a call is made on, or an argument passed by reference.
  * The call receives them all at once, so the reference variables they end
  * are ended only after all arguments are evaluated. */
-static void visit_operand(OCtx *c, Expr *e, State *s, PendingVec *pending) {
+static void visit_operand(OCtx *c, Expr *e, State *s, PendingVec *pending, bool change) {
     switch (e->kind) {
     case E_VAR:
     case E_THIS:
     case E_FIELD:
     case E_INDEX:
-    case E_TO_IFACE: use_place(c, e, s, pending); return;
+    case E_TO_IFACE: use_place(c, e, s, pending, change); return;
     default: visit_expr(c, e, s); return;
     }
 }
+
+static bool call_changes_receiver(Expr *call);
+static bool call_changes_arg(Expr *call, int i);
 
 typedef struct Reach {
     PathVec paths;
     Loc loc;
     const char *who;
+    bool change;
 } Reach;
 
-/* A call can't reach the same object in two ways: the object it is called on
- * and its reference arguments must not overlap (spec 9.3). */
+/* A call can receive overlapping objects, as the object it is called on and as
+ * reference arguments, only if it changes none of them (spec 9.3). */
 static void check_call_reach(OCtx *c, Expr *e) {
     if (error_suppress > 0) return;
     VEC(Reach) reaches = {0};
     if (has_receiver(e)) {
-        Reach r = {{0}, e->base->loc, "the object it is called on"};
+        Reach r = {{0}, e->base->loc, "the object it is called on", call_changes_receiver(e)};
         place_paths(c, e->base, &r.paths);
         vec_push(reaches, r);
     }
     for (int i = 0; i < e->args.len; i++) {
         if (!passed_by_reference(e, i)) continue;
-        Reach r = {{0}, e->args.data[i]->loc, fmt_str("argument %d", i + 1)};
+        Reach r = {{0}, e->args.data[i]->loc, fmt_str("argument %d", i + 1), call_changes_arg(e, i)};
         place_paths(c, e->args.data[i], &r.paths);
         vec_push(reaches, r);
     }
     for (int j = 1; j < reaches.len; j++) {
         for (int i = 0; i < j; i++) {
             int a, b;
+            if (!reaches.data[i].change && !reaches.data[j].change) continue; /* reading only */
             if (!any_overlap(&reaches.data[i].paths, &reaches.data[j].paths, &a, &b)) continue;
-            Path *later = &reaches.data[j].paths.data[b];
-            Path *earlier = &reaches.data[i].paths.data[a];
-            const char *what = later->len < earlier->len ? fmt_str("part of %s", later->text) : later->text;
-            error_at(reaches.data[j].loc,
-                     "this call already reaches %s through %s, and a call can reach an object in only one way; pass a "
-                     "copy with .copy()",
-                     what, reaches.data[i].who);
+            bool later_changes = reaches.data[j].change;
+            Reach *changer = later_changes ? &reaches.data[j] : &reaches.data[i];
+            Reach *other = later_changes ? &reaches.data[i] : &reaches.data[j];
+            Path *changed = &changer->paths.data[later_changes ? b : a];
+            Path *received = &other->paths.data[later_changes ? a : b];
+            error_at(reaches.data[j].loc, "this call changes %s (%s), so it can't also receive %s (%s); pass a copy with .copy()",
+                     changed->text, changer->who, received->text, other->who);
             break;
         }
     }
@@ -704,7 +714,7 @@ static void check_global_reach(OCtx *c, Expr *e, State *s) {
         }
         PathVec self = {0};
         vec_push(self, path_root(NULL));
-        end_overlapping(c, s, &self, NULL, e->loc,
+        end_overlapping(c, s, &self, NULL, true, e->loc,
                         fmt_str("this call can reach global object '%s': %s", global->name, reach_chain_text(via, g)));
         free(self.data);
     }
@@ -712,13 +722,13 @@ static void check_global_reach(OCtx *c, Expr *e, State *s) {
 
 static void visit_call(OCtx *c, Expr *e, State *s) {
     PendingVec pending = {0};
-    if (has_receiver(e)) visit_operand(c, e->base, s, &pending);
+    if (has_receiver(e)) visit_operand(c, e->base, s, &pending, call_changes_receiver(e));
     State after_receiver = state_copy(c, s);
     /* Each referenced argument must still own its object once all arguments
      * have been evaluated. */
     State *before_arg = xcalloc((size_t)(e->args.len ? e->args.len : 1), sizeof(State));
     for (int i = 0; i < e->args.len; i++) {
-        if (passed_by_reference(e, i)) visit_operand(c, e->args.data[i], s, &pending);
+        if (passed_by_reference(e, i)) visit_operand(c, e->args.data[i], s, &pending, call_changes_arg(e, i));
         else visit_expr(c, e->args.data[i], s);
         before_arg[i] = state_copy(c, s);
     }
@@ -733,7 +743,8 @@ static void visit_call(OCtx *c, Expr *e, State *s) {
     check_global_reach(c, e, s);
     for (int i = 0; i < pending.len; i++) {
         Pending *p = &pending.data[i];
-        end_overlapping(c, s, &p->paths, p->via, p->loc, fmt_str("%s is used", p->paths.data[0].text));
+        end_overlapping(c, s, &p->paths, p->via, p->change, p->loc,
+                        fmt_str("%s is %s", p->paths.data[0].text, p->change ? "changed" : "used"));
         free(p->paths.data);
     }
     free(pending.data);
@@ -759,7 +770,7 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_THIS:
     case E_FIELD:
     case E_INDEX:
-    case E_TO_IFACE: use_place(c, e, s, NULL); return;
+    case E_TO_IFACE: use_place(c, e, s, NULL, e->kind == E_VAR && e->transfers_ownership); return;
     case E_LENGTH:
     case E_COPY:
     case E_CONVERT:
@@ -868,7 +879,7 @@ static void declare_reference(OCtx *c, Stmt *st, State *s) {
     if (st->init) place_paths(c, st->init, t);
     if (!s->reachable) return;
     s->v[v->index] = USABLE;
-    end_overlapping(c, s, t, v, st->loc, fmt_str("reference '%s' reaches the same object", v->name));
+    end_overlapping(c, s, t, v, v->changes, st->loc, fmt_str("reference '%s' reaches the same object", v->name));
 }
 
 static void visit_stmt(OCtx *c, Stmt *st, State *s) {
@@ -899,19 +910,19 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
             if (c->refs.len) {
                 PathVec paths = {0};
                 vec_push(paths, path_root(whole));
-                end_overlapping(c, s, &paths, NULL, st->loc, fmt_str("%s is assigned", whole->name));
+                end_overlapping(c, s, &paths, NULL, true, st->loc, fmt_str("%s is assigned", whole->name));
                 free(paths.data);
             }
             return;
         }
-        visit_expr(c, st->expr, s);
+        visit_operand(c, st->expr, s, NULL, true); /* the target is changed */
         State after_target = state_copy(c, s);
         visit_expr(c, st->value, s);
         check_still_owned(c, root_var(st->expr), &after_target, s, st->loc, "this assignment");
         free(after_target.v);
         return;
     }
-    case S_INCDEC: visit_expr(c, st->expr, s); return;
+    case S_INCDEC: visit_operand(c, st->expr, s, NULL, true); return;
     case S_IF: {
         visit_expr(c, st->expr, s);
         State other = state_copy(c, s);
@@ -955,6 +966,144 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
     }
 }
 
+/* ---- Which uses change an object (spec 9.3) ---- */
+
+static bool string_method_changes(Expr *call) {
+    return call->kind == E_CALL_STRING && call->base &&
+           (strcmp(call->name, "append") == 0 || strcmp(call->name, "appendChar") == 0 ||
+            strcmp(call->name, "setCharAt") == 0);
+}
+
+/* True if a call changes the object it is called on. */
+static bool call_changes_receiver(Expr *call) {
+    switch (call->kind) {
+    case E_CALL_METHOD:
+    case E_CALL_IFACE: return call->decl->changes_this;
+    case E_CALL_STRING: return string_method_changes(call);
+    default: return false;
+    }
+}
+
+/* True if a call changes argument i, passed by reference. */
+static bool call_changes_arg(Expr *call, int i) {
+    if (!passed_by_reference(call, i)) return false;
+    Var *p = call_param(call, i);
+    return p && p->changes;
+}
+
+/* Records that fn changes the object e reaches: `this`, a reference
+ * parameter, or a reference variable and what it was declared from. */
+static void mark_changed(Decl *fn, Expr *e, bool *progress) {
+    while (e->kind == E_FIELD || e->kind == E_INDEX || e->kind == E_TO_IFACE) e = e->base;
+    if (e->kind == E_THIS) {
+        if (fn->kind == D_METHOD && !fn->changes_this) {
+            fn->changes_this = true;
+            *progress = true;
+        }
+        return;
+    }
+    if (e->kind == E_VAR) {
+        Var *v = e->var;
+        if (!v->is_ref) return; /* an object the function owns */
+        if (!v->changes) {
+            v->changes = true;
+            *progress = true;
+        }
+        if (v->kind == VAR_LOCAL && v->ref_init) mark_changed(fn, v->ref_init, progress);
+        return;
+    }
+    if (is_ref_call(e)) {
+        if (e->kind != E_CALL_FUNC) mark_changed(fn, e->base, progress);
+        for (int i = 0; i < e->args.len; i++) {
+            if (passed_by_reference(e, i)) mark_changed(fn, e->args.data[i], progress);
+        }
+    }
+}
+
+static void scan_changes_expr(Decl *fn, Expr *e, bool *progress) {
+    if (!e) return;
+    switch (e->kind) {
+    case E_CALL_METHOD:
+    case E_CALL_IFACE:
+    case E_CALL_STRING:
+        if (call_changes_receiver(e)) mark_changed(fn, e->base, progress);
+        /* fall through */
+    case E_CALL_FUNC:
+    case E_CALL_CTOR:
+        for (int i = 0; i < e->args.len; i++) {
+            if (call_changes_arg(e, i)) mark_changed(fn, e->args.data[i], progress);
+        }
+        break;
+    default: break;
+    }
+    scan_changes_expr(fn, e->base, progress);
+    scan_changes_expr(fn, e->index, progress);
+    for (int i = 0; i < e->args.len; i++) scan_changes_expr(fn, e->args.data[i], progress);
+    if (e->sw) {
+        scan_changes_expr(fn, e->sw->subject, progress);
+        for (int i = 0; i < e->sw->arms.len; i++) scan_changes_expr(fn, e->sw->arms.data[i].expr, progress);
+    }
+}
+
+static void scan_changes_stmt(Decl *fn, Stmt *s, bool *progress) {
+    if (!s) return;
+    if (s->kind == S_VAR && s->var->is_ref) s->var->ref_init = s->init;
+    if (s->kind == S_ASSIGN || s->kind == S_INCDEC) mark_changed(fn, s->expr, progress);
+    for (int i = 0; i < s->stmts.len; i++) scan_changes_stmt(fn, s->stmts.data[i], progress);
+    scan_changes_expr(fn, s->init, progress);
+    scan_changes_expr(fn, s->expr, progress);
+    scan_changes_expr(fn, s->value, progress);
+    scan_changes_stmt(fn, s->then_branch, progress);
+    scan_changes_stmt(fn, s->else_branch, progress);
+    scan_changes_stmt(fn, s->body, progress);
+    scan_changes_stmt(fn, s->for_init, progress);
+    scan_changes_stmt(fn, s->for_update, progress);
+    if (s->sw) {
+        scan_changes_expr(fn, s->sw->subject, progress);
+        for (int i = 0; i < s->sw->arms.len; i++) scan_changes_stmt(fn, s->sw->arms.data[i].body, progress);
+    }
+}
+
+/* An interface method changes `this`, or a parameter, if any implementation
+ * does. */
+static void infer_interface_changes(Program *prog, bool *progress) {
+    for (int i = 0; i < prog->all_structs.len; i++) {
+        Decl *s = prog->all_structs.data[i];
+        for (int j = 0; j < s->implements.len; j++) {
+            Decl *iface = s->implements.data[j].decl;
+            if (!iface) continue;
+            for (int k = 0; k < iface->members.len; k++) {
+                Decl *im = iface->members.data[k];
+                Decl *m = map_get(&s->member_map, im->name);
+                if (!m || m->kind != D_METHOD) continue;
+                if (m->changes_this && !im->changes_this) {
+                    im->changes_this = true;
+                    *progress = true;
+                }
+                for (int p = 0; p < im->params.len && p < m->params.len; p++) {
+                    if (m->params.data[p]->changes && !im->params.data[p]->changes) {
+                        im->params.data[p]->changes = true;
+                        *progress = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* Works out, for the whole program, which methods change `this` and which
+ * reference parameters and variables are used to change their object. */
+static void infer_changes(Program *prog) {
+    for (bool progress = true; progress;) {
+        progress = false;
+        for (int i = 0; i < prog->all_functions.len; i++) {
+            Decl *fn = prog->all_functions.data[i];
+            scan_changes_stmt(fn, fn->body, &progress);
+        }
+        infer_interface_changes(prog, &progress);
+    }
+}
+
 static void check_function(Decl *fn) {
     OCtx c = {0};
     c.fn = fn;
@@ -992,5 +1141,6 @@ void ownership_check_program(Program *prog) {
     uint8_t *state = xcalloc((size_t)(prog->all_globals.len ? prog->all_globals.len : 1), 1);
     for (int g = 0; g < prog->all_globals.len; g++) order_globals(prog, g, state);
     free(state);
+    infer_changes(prog);
     for (int i = 0; i < prog->all_functions.len; i++) check_function(prog->all_functions.data[i]);
 }

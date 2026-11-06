@@ -1,9 +1,9 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.13 — Global objects
+**Version:** 0.14 — Many readers
 **Status:** Preliminary Specification
 
-Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Version 0.11 requires local variables to be assigned before they are used (§6.8). Version 0.12 makes arrays Java-style: the type `T[]` has no size, and an array's length is fixed when it is created with `T[n]` (§6.6). Version 0.13 adds global objects, struct values that belong to the program and are used through their methods (§5.6, §9.3). Section 18 lists what remains open.
+Version 0.3 resolved the open questions the first compiler depends on: constructors, strings, arrays, integer overflow, parameter passing and ownership transfer, interface dispatch, constants, imports and the C function interface. Version 0.4 adds value and reference parameters (§7.3): `Engine engine` receives its own object and becomes its owner, `Engine* engine` refers to the caller's object in place. Version 0.5 makes `String` a mutable object type with built-in methods (§6.5), frees owned objects automatically when their owner ends (§7.6), and defines `==` as structural equality (§6.9). Version 0.6 separates comparing values (`==`) from comparing references (`is`, removed in 0.10). Version 0.7 adds `equals` to compare the values references point to (§6.9). Version 0.8 adds string concatenation with `+` (§6.5). Version 0.9 makes value parameters receive copies of their arguments (§7.3). Version 0.10 adds reference variables and functions that return references, allows only one way to reach an object at a time (§9), and removes aliases and `is`. Version 0.11 requires local variables to be assigned before they are used (§6.8). Version 0.12 makes arrays Java-style: the type `T[]` has no size, and an array's length is fixed when it is created with `T[n]` (§6.6). Version 0.13 adds global objects, struct values that belong to the program and are used through their methods (§5.6, §9.3). Version 0.14 lets any number of references read an object at once; only changing it needs exclusive access (§9.3). Section 18 lists what remains open.
 
 ## 1. Vision
 
@@ -491,7 +491,7 @@ This applies to every type, including numbers: `int count; count++;` is an error
 
 Both operands must be values of the same type, after implicit conversion for numbers (§6.2).
 
-A reference (§9) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. Readers coming from different languages would expect `==` on references to compare either addresses or values, so Nirea makes the comparison explicit: `a.equals(b)` compares the values `a` and `b` refer to, by structure, exactly as `==` compares two values. Comparing addresses is never needed, because two references in use never reach the same object (§9.3).
+A reference (§9) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. Readers coming from different languages would expect `==` on references to compare either addresses or values, so Nirea makes the comparison explicit: `a.equals(b)` compares the values `a` and `b` refer to, by structure, exactly as `==` compares two values. Nirea doesn't compare addresses.
 
 `equals` is built in for every struct, array and `String` type. The object it is called on is used in place, like `this`, and its argument is a value parameter (§7.3), so `a.equals(a)` is allowed. Nothing changes owner. Either side can be a reference or a value, so `answer.equals("yes")` compares a `String*` parameter with a literal. Fields reached through a reference are values and can be compared with `==` directly (`a.x == b.x`). Interface values have no `equals`.
 
@@ -620,7 +620,7 @@ void setEngine(Engine* engine) {
 
 `T*` is a reference, not a pointer. It is never null and has no arithmetic. Besides parameters, it can be the type of a local variable or a return value (§9), but never of a field or array element, so a reference can't outlive the object it refers to. Only struct, array, `String` and interface types can be passed by reference. Interface parameters must be references (§5.3).
 
-A call can't reach the same object twice: the object a method is called on and the arguments for reference parameters must be different objects, and none can be part of another (§9.3). Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
+A call can receive the same object more than once, as the object it is called on and as arguments for reference parameters, as long as it changes none of them (§9.3). Parameters of primitive types and enums are always passed by value. They are local copies, and the function can assign to them.
 
 The method receiver `this` is a reference to the object the method was called on. An argument that is a call result, such as `inspect(createEngine())`, lives until the calling statement ends.
 
@@ -739,7 +739,7 @@ engine.power = 200;                 // changes the engine inside vehicle
 engine = other.engine;              // error: a reference is set when it is declared
 ```
 
-Through a reference variable, code can read and write fields and elements and call methods, exactly as through a reference parameter (§7.3). A reference variable is scoped like any local variable, and refers only to an object that exists when it is declared, so it can't outlive that object. Section 9.3 describes what happens when the object is reached in another way.
+Through a reference variable, code can read and write fields and elements and call methods, exactly as through a reference parameter (§7.3). A reference variable is scoped like any local variable, and refers only to an object that exists when it is declared, so it can't outlive that object. Section 9.3 describes when it can be used together with other references.
 
 ### 9.2 Returning references
 
@@ -773,44 +773,46 @@ A function can only return a reference to an object that outlives the call: `thi
 
 The caller can use the result directly, as in the chained calls above, or store it in a reference variable (§9.1). Either way, the result counts as reaching the object the method was called on and every argument passed to a reference parameter, each as a whole (§9.3). Storing the result requires all of these to be existing objects, not temporaries.
 
-### 9.3 One way to reach an object
+### 9.3 Reading and changing
 
-At any point, an object can be reached in only one way: through its owner, or through one reference. A reference variable ends as soon as its object is reached in another way:
+An object can be read through any number of references at once, but it can be changed only while nothing else uses it. So an object can't be changed, replaced or given away while a reference into it is still in use, and every reference stays valid.
 
-```nirea
-Engine* a = vehicle.engine;
-Engine* b = vehicle.engine;   // a new reference to the same engine: a ends
-a.power = 1;                  // error: a can no longer be used
-```
+Changing an object means assigning to it or to one of its parts, using `++`, `--` or a compound assignment on it, calling a method that changes `this`, passing it to a reference parameter that the function changes, calling `append`, `appendChar` or `setCharAt` on a `String`, or giving it to a new owner. Anything else, such as reading its fields, calling methods that don't change `this`, copying it or comparing it, only reads it.
+
+Nothing marks which methods change `this` or which reference parameters a function changes: the compiler works it out from the code. A method changes `this` if its body changes `this` or a part of it, directly or through a call, and a function changes a reference parameter in the same way. An interface method changes `this` if any of its implementations does. A reference variable is *changing* if its object is changed through it, and *reading* otherwise.
 
 Two objects overlap when they are the same object or one is part of the other: `vehicle`, `vehicle.engine` and `vehicle.engine.power` all overlap, while `vehicle.engine` and `vehicle.speed` don't. Array elements with different constant indexes, such as `engines[0]` and `engines[1]`, don't overlap. An element whose index is computed at run time, such as `engines[i]`, may be any element, so it overlaps every element of the array.
 
-A reference variable ends when:
-
-- another reference variable is declared that reaches an overlapping object, including one declared from it: after `Engine* b = a;`, `a` has ended;
-- an overlapping object is used in any other way: through its owner, a parameter, `this` or another reference. Reading or writing an object or its fields, calling a method on it, passing it to a function, copying it, assigning to it and giving it to a new owner all use it.
+A reference variable ends when an overlapping object is changed in another way: through its owner, a parameter, `this` or another reference, or by declaring a changing reference variable to it. A changing reference variable must be the only way to its object while it is in use, so it also ends when an overlapping object is used in any other way, even only to read it, or another reference variable to it is declared.
 
 ```nirea
-Engine* engine = vehicle.engine;
-vehicle.speed = 50;           // speed doesn't overlap the engine
+Engine* a = vehicle.engine;          // a and b only read
+Engine* b = vehicle.engine;
+println(a.power + b.power);          // both usable
+println(vehicle.engine.power);       // reading through the owner: still usable
+vehicle.engine.power = 100;          // a change: a and b end
+println(a.power);                    // error: a can no longer be used
+
+Engine* engine = vehicle.engine;     // changing: engine.power is assigned below
+vehicle.speed = 50;                  // speed doesn't overlap the engine
 engine.power = 120;
-vehicle.service();            // uses the whole vehicle: engine ends
-engine.power = 130;           // error: engine can no longer be used
+println(vehicle.engine.power);       // any other use ends a changing reference
+engine.power = 130;                  // error: engine can no longer be used
 ```
 
-Using a reference variable, including passing it to a reference parameter, doesn't end it. Reference parameters and `this` never end: using an object through them ends the reference variables that overlap it. A reference variable that has ended stays ended until the end of its scope. As with ownership transfers (§7.1), the compiler follows this through all control flow: using a reference variable that has ended, or may have ended on some path, is a compile-time error.
+Using a reference variable, including passing it to a reference parameter, doesn't end it. Reference parameters and `this` never end: using an object through them ends the reference variables that overlap it, as above. A reference variable that has ended stays ended until the end of its scope. As with ownership transfers (§7.1), the compiler follows this through all control flow: using a reference variable that has ended, or may have ended on some path, is a compile-time error.
 
-A call can't reach the same object in two ways either. The object a method is called on and the arguments passed to reference parameters must not overlap:
+A call can receive the same object, or overlapping objects, more than once, as the object it is called on and as arguments for reference parameters, as long as it changes none of them. If it changes one of them, that one can't overlap the others:
 
 ```nirea
-addFrom(counter, counter);           // error if both parameters are references
-vehicle.setEngine(vehicle.engine);   // error if setEngine takes an Engine*
+total(counter, counter);             // ok: total only reads both parameters
+addFrom(counter, counter);           // error: addFrom changes its first parameter
 addFrom(counter, counter.copy());    // ok
 ```
 
-Arguments for value parameters are copies (§7.3), so they never overlap. This includes the arguments of the built-in methods `equals`, `append` and `indexOf`, so `text.append(text)` is allowed.
+Arguments for value parameters are copies (§7.3), so they never overlap.
 
-Because an object is never reachable through two references in use, replacing an object or giving it to a new owner can't leave a reference to the old object behind.
+Because an object can't be changed while another reference into it is in use, replacing an object or giving it to a new owner can't leave a reference to the old object behind.
 
 #### References into global objects
 

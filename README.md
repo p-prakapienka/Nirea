@@ -217,8 +217,8 @@ A reference (`T*`) works on an existing object in place, without owning it. Besi
 - `Engine* engine = vehicle.engine;` declares a reference variable. It is set once, when it is declared, and must refer to an existing object, not a temporary such as `Engine()`.
 - A function can return a reference to `this`, a reference parameter, or a part of one, but never to its own local variables.
 - A reference never owns its object. `.copy()` gives an independent object, and passing a reference to a value parameter passes a copy.
-- An object can be reached in only one way at a time. Reaching it through its owner, or through a new reference, ends the old reference.
-- A call can't reach the same object twice through its reference parameters.
+- Any number of references can read an object at once. Changing the object ends the other references to it, and a reference used to change an object must be the only way to it while it is in use. The compiler works out what changes what; nothing is marked.
+- A call can receive the same object more than once if it only reads it, but not if it changes it.
 
 A reference variable gives a short name to an object, wherever it is, without copying it:
 
@@ -377,7 +377,7 @@ void main() {
 }
 ```
 
-The compiler rejects references that could outlive their object or reach it in two ways:
+The compiler rejects references that could outlive their object, or that could see it change while they use it:
 
 ```nirea
 Engine* engine = vehicle.engine;
@@ -385,11 +385,11 @@ Engine owned = engine;                   // error: a reference doesn't own its o
 engine = other.engine;                   // error: a reference is set when it is declared
 vehicle.speed = 50;                      // speed isn't part of the engine
 engine.power = 120;
-println(vehicle.engine.power);           // reaches the engine through vehicle: engine ends
+println(vehicle.engine.power);           // engine changes the engine, so any other use ends it
 engine.power = 130;                      // error: the reference ended
 
 Engine* made = Engine();                 // error: a reference can't refer to a temporary
-addFrom(counter, counter);               // error: the call reaches counter twice
+addFrom(counter, counter);               // error: addFrom changes counter, so it can't receive it twice
 
 Engine* make() {
     Engine engine = Engine();
@@ -399,7 +399,7 @@ Engine* make() {
 
 ## Status
 
-Nirea is at an early stage. The first compiler, `nirea`, implements version 0.13 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.14 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
 
 ## Building the compiler
 
@@ -542,5 +542,5 @@ cd garden && nirea run       # the default project is the current directory
 
 ## Documentation
 
-- [Language design specification](docs/language-design.md) (v0.13, preliminary)
+- [Language design specification](docs/language-design.md) (v0.14, preliminary)
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors
