@@ -1,3 +1,6 @@
 build/
 build-*/
 /target/
+
+# Build output of test projects
+tests/projects/*/target/
