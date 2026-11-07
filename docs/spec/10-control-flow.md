@@ -61,7 +61,7 @@ switch (state) {
 
 An arm of a switch expression is a single expression. A `case` can list several values, separated by commas. Case values are enum values (written unqualified), integer, character, boolean or string literals. Qualified enum values (`case State.IDLE`) and named constants aren't allowed as case values. A switch compares its subject with the case values, so the subject must be a value, not a reference ([§6.9](06-types.md#69-equality)).
 
-A switch expression of a struct, array or `String` type is used where its result gets an owner ([§7.1](07-ownership.md#71-ownership-transfer)): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element or reference), the switch can only be used there; elsewhere, for example to call a method on its result, it would act on an implicit copy of that object. A switch whose branches all create new objects, such as constructor calls or string literals, can be used anywhere.
+A switch expression of a struct, array or `String` type is used where its result gets an owner ([§7.1](07-ownership.md#71-assignment-copies)): as an initialiser, assigned, returned or passed by value. If a branch is an existing object (a variable, field, array element or reference), the switch can only be used there, where its owner gets a copy; elsewhere, for example to call a method on its result, it would work on a copy that is lost at once. A switch whose branches all create new objects, such as constructor calls or string literals, can be used anywhere.
 
 `break` and `continue` inside a switch arm apply to the enclosing loop.
 

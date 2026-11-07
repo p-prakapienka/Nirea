@@ -1,6 +1,6 @@
 # Nirea — Language Design Specification
 
-**Version:** 0.14 — Many readers
+**Version:** 0.15 — Assignment copies
 **Status:** Preliminary Specification
 
 This specification defines the Nirea language exactly, one chapter per page. To learn the language by example, read the [guide](../guide/README.md) instead.
@@ -29,8 +29,8 @@ This specification defines the Nirea language exactly, one chapter per page. To 
   - [6.8 Zero values and initialisation](06-types.md#68-zero-values-and-initialisation)
   - [6.9 Equality](06-types.md#69-equality)
 - [7. Ownership and memory safety](07-ownership.md)
-  - [7.1 Ownership transfer](07-ownership.md#71-ownership-transfer)
-  - [7.2 Explicit copying](07-ownership.md#72-explicit-copying)
+  - [7.1 Assignment copies](07-ownership.md#71-assignment-copies)
+  - [7.2 Moving instead of copying](07-ownership.md#72-moving-instead-of-copying)
   - [7.3 Passing values and references](07-ownership.md#73-passing-values-and-references)
   - [7.4 Nested ownership](07-ownership.md#74-nested-ownership)
   - [7.5 Object replacement](07-ownership.md#75-object-replacement)
@@ -75,5 +75,6 @@ This specification defines the Nirea language exactly, one chapter per page. To 
 - **0.12** makes arrays Java-style: the type `T[]` has no size, and an array's length is fixed when it is created with `T[n]` ([§6.6](06-types.md#66-arrays)).
 - **0.13** adds global objects, struct values that belong to the program and are used through their methods ([§5.6](05-syntax.md#56-global-objects), [§9.3](09-references.md#93-reading-and-changing)).
 - **0.14** lets any number of references read an object at once; only changing it needs exclusive access ([§9.3](09-references.md#93-reading-and-changing)).
+- **0.15** makes assignment copy: a variable, field or parameter without `*` always holds an object of its own, `copy()` is removed, and a local variable that isn't used again moves instead of being copied ([§7.1](07-ownership.md#71-assignment-copies), [§7.2](07-ownership.md#72-moving-instead-of-copying)).
 
 [Section 18](18-open-questions.md) lists what remains open.
