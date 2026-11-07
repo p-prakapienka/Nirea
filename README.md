@@ -21,6 +21,7 @@ void main() {
 
 - Free functions, structs with methods, interfaces and namespaces. No classes or inheritance.
 - Exclusive ownership checked by the compiler. No garbage collector and no user-visible raw pointers.
+- Values and references: a variable without `*` holds an object of its own, so assignment copies; a reference (`T*`) works on an existing object in place.
 - No hidden values: objects are created explicitly, as in `Circle circle = Circle();`, and a local variable must be assigned before it is used.
 - Ahead-of-time compilation to native code, with direct interoperability with C libraries.
 - A small language core, with further functionality in optional libraries.
@@ -53,9 +54,9 @@ On Windows, see [Windows](docs/guide/12-windows.md).
   - [10. Namespaces and projects](docs/guide/10-projects.md)
   - [11. Calling C](docs/guide/11-c-interop.md)
   - [12. Windows](docs/guide/12-windows.md)
-- [Language specification](docs/spec/README.md) (v0.14, preliminary): the exact rules, one chapter per page.
+- [Language specification](docs/spec/README.md) (v0.15, preliminary): the exact rules, one chapter per page.
 - [AGENTS.md](AGENTS.md): guidance for AI coding agents and contributors.
 
 ## Status
 
-Nirea is at an early stage. The first compiler, `nirea`, implements version 0.14 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.
+Nirea is at an early stage. The first compiler, `nirea`, implements version 0.15 of the specification. It translates Nirea to C and builds native executables with GCC or Clang.

@@ -8,7 +8,7 @@ Nirea is a statically typed, memory-safe, native programming language. Its synta
 
 ## Current state
 
-The project is in **Phase 2: Initial compiler** (spec §19). The compiler implements the language as specified in version 0.14 of the spec.
+The project is in **Phase 2: Initial compiler** (spec §19). The compiler implements the language as specified in version 0.15 of the spec.
 
 ```text
 AGENTS.md                  this file
@@ -19,7 +19,7 @@ docs/
 ├── guide/                 the language by example, one page per topic
 │   ├── README.md          contents
 │   └── 01-getting-started.md … 12-windows.md, in reading order
-└── spec/                  language specification (v0.14, preliminary), one file per chapter
+└── spec/                  language specification (v0.15, preliminary), one file per chapter
     ├── README.md          version, contents and version history
     ├── 01-vision.md … 20-identity.md
     └── grammar.md         Appendix A
@@ -34,7 +34,7 @@ src/                       the compiler, in C11
 ├── parser.c               syntax tree (Appendix A, docs/spec/grammar.md)
 ├── ast.h, types.c         syntax tree and semantic types
 ├── sema.c                 name resolution and type checking
-├── ownership.c            ownership transfers, references and global objects (§5.6, §7, §9)
+├── ownership.c            initialisation, moves, references and global objects (§5.6, §7, §9)
 ├── codegen.c              C generation
 └── common.c               memory, strings, maps, diagnostics
 tests/

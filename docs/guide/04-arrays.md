@@ -1,6 +1,6 @@
 # 4. Arrays
 
-Arrays work as in Java. The type `T[]` has no size: the length is fixed when the array is created, with `T[n]` or from a list of values. Elements start at their zero value, `a.length` gives the length, and an index outside the array is a runtime error. Arrays are objects, like structs and strings: assignment transfers them and `.copy()` copies them.
+Arrays work as in Java. The type `T[]` has no size: the length is fixed when the array is created, with `T[n]` or from a list of values. Elements start at their zero value, `a.length` gives the length, and an index outside the array is a runtime error. Arrays are objects, like structs and strings: assigning an array gives the new variable its own copy.
 
 ```nirea
 struct Team {
@@ -42,9 +42,9 @@ void main() {
     team.players[0] = "Ann";
     println(team.players.length);            // 3
 
-    int[] backup = scores.copy();            // explicit copy: both stay usable
-    int[] moved = scores;                    // assignment transfers ownership
-    println(backup[0] + moved[4]);           // 17
+    int[] backup = scores;                   // a copy: both stay usable
+    backup[0] = 99;
+    println(scores[0]);                      // 10
 }
 ```
 

@@ -2,10 +2,10 @@
 
 Nirea has no garbage collector. Instead, every struct, array and `String` has exactly one owner, and is freed automatically when its owner goes out of scope. The compiler checks the rules, so a program can't use an object after it is freed, or free it twice.
 
-- Assignment and `return` transfer ownership. The old variable can't be used afterwards.
-- `.copy()` makes an explicit deep copy, so both stay usable.
-- A value parameter (`Engine engine`) receives a copy automatically. The caller's object is unchanged.
-- A reference parameter (`Engine* engine`) works on the caller's object in place ([References](08-references.md)).
+- A variable without `*` always holds an object of its own. Assigning an object to it gives it a copy, so both stay usable.
+- The same holds for fields, array elements, `return` and value parameters (`Engine engine`).
+- When the old variable isn't used again, the object moves instead of being copied, which costs nothing.
+- To work on an existing object in place, without a copy, use a reference (`Engine* engine`). See [References](08-references.md).
 
 Numbers, `boolean`, `char` and enum values aren't owned: they are copied like in any other language.
 
@@ -33,44 +33,45 @@ void main() {
     boost(engine);                       // changes engine in place
     println(engine.power);               // 190
 
-    Engine spare = engine.copy();        // explicit copy: both stay usable
-    Engine current = engine;             // assignment transfers ownership
-    println(spare.power);                // 190
-    println(current.power);              // 190
+    Engine spare = engine;               // a copy: both stay usable
+    spare.power = 1;
+    println(engine.power);               // 190
+    println(spare.power);                // 1
 
     String a = "abc";
-    String b = a;                        // a is no longer accessible
-    String c = b.copy();                 // b and c are both usable
-    println(b + c);                      // abcabc
+    String b = a;                        // strings work the same way
+    b.append("d");
+    println(a + " " + b);                // abc abcd
 }
 ```
 
-Using a variable after its object has been transferred is a compile error, even if it happened on only one path:
+There is no `copy()` method: assignment is how you copy.
+
+## Copies and moves
+
+Copying a big object, such as a large array, takes time. The compiler avoids it when it can: if the old variable isn't used again, its object moves to the new owner and nothing is copied. Returning a local variable never copies it.
 
 ```nirea
-Engine engine = Engine(90);
-Engine current = engine;
-println(engine.power);                   // error: its object was given to a new owner
-
-Engine first = Engine(1);
-if (ready) {
-    Engine second = first;
+int[] squares(int count) {
+    int[] table = int[count];
+    for (int i = 0; i < count; i++) {
+        table[i] = i * i;
+    }
+    return table;                        // moves: table ends here
 }
-println(first.power);                    // error: first may have given its object away
+
+void main() {
+    int[] table = squares(1000);
+    int[] saved = table;                 // moves: table isn't used again
+    println(saved[10]);                  // 100
+}
 ```
 
-Assigning a new object to the variable makes it usable again.
+A variable that is used later, on any path or in a later loop iteration, is copied instead. To be sure that a big object isn't copied, use a reference to it: `int[]* view = table;`.
 
 ## Parts of an object
 
-A field or array element is part of its owner, so it can't be given away. Copy it instead:
-
-```nirea
-Engine spare = vehicle.engine;           // error: a field stays part of its owner
-Engine spare = vehicle.engine.copy();    // ok
-```
-
-A function receives and returns objects the same way:
+A field or array element is part of its owner. Assigning it to a variable gives a copy, and the original stays where it is:
 
 ```nirea
 struct Engine {
@@ -81,7 +82,7 @@ struct Vehicle {
     Engine engine;
 
     void setEngine(Engine engine) {      // receives a copy
-        this.engine = engine;            // the field becomes its owner
+        this.engine = engine;            // the field takes it over
     }
 }
 
@@ -95,7 +96,9 @@ void main() {
     Engine engine = makeEngine(150);
     Vehicle vehicle = Vehicle();
     vehicle.setEngine(engine);
-    println(engine.power);               // 150: engine is still usable
+    Engine spare = vehicle.engine;       // a copy of the field
+    spare.power = 1;
+    println(engine.power);               // 150
     println(vehicle.engine.power);       // 150
 }
 ```

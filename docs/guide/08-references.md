@@ -4,7 +4,7 @@ A reference (`T*`) works on an existing object in place, without owning it. Besi
 
 - `Engine* engine = vehicle.engine;` declares a reference variable. It is set once, when it is declared, and must refer to an existing object, not a temporary such as `Engine()`.
 - A function can return a reference to `this`, a reference parameter, or a part of one, but never to its own local variables.
-- A reference never owns its object. `.copy()` gives an independent object, and passing a reference to a value parameter passes a copy.
+- A reference never owns its object. Assigning it to a variable without `*`, or passing it to a value parameter, gives a copy of the object.
 - Any number of references can read an object at once. Changing the object ends the other references to it, and a reference used to change an object must be the only way to it while it is in use. The compiler works out what changes what; nothing is marked.
 - A call can receive the same object more than once if it only reads it, but not if it changes it.
 
@@ -53,7 +53,7 @@ void main() {
     engine.power = 100;
     tune(engine);                            // passing it on keeps it usable
     println(engine.power);                   // 110
-    Engine spare = engine.copy();            // an independent copy
+    Engine spare = engine;                   // a copy of the engine
 
     for (int i = 0; i < garage.vehicles.length; i++) {
         Vehicle* vehicle = garage.vehicles[i];   // a new reference on every iteration
@@ -211,7 +211,6 @@ The compiler rejects references that could outlive their object, or that could s
 
 ```nirea
 Engine* engine = vehicle.engine;
-Engine owned = engine;                   // error: a reference doesn't own its object; use engine.copy()
 engine = other.engine;                   // error: a reference is set when it is declared
 vehicle.speed = 50;                      // speed isn't part of the engine
 engine.power = 120;

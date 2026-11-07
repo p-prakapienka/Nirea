@@ -35,7 +35,6 @@ void main() {
 | `int toInt()`                        | the text as an `int`                                                |
 | `int64 toInt64()`                    | the text as an `int64`                                              |
 | `float64 toFloat64()`                | the text as a `float64`                                             |
-| `String copy()`                      | an independent copy                                                 |
 | `boolean equals(String text)`        | whether both hold the same bytes                                    |
 
 `String.of(value)` turns a number, `boolean`, `char` or enum value into a `String`, with the same text `println` would print. Other values aren't converted implicitly, so write `"count: " + String.of(count)`.
@@ -44,7 +43,7 @@ An index outside the string, and text that `toInt`, `toInt64` or `toFloat64` can
 
 ## Strings are objects
 
-A `String` follows the same rules as a struct ([Ownership](07-ownership.md)): assignment transfers it, `.copy()` copies it, and a value parameter receives a copy. The only difference is the literal: each time `"text"` is evaluated, it creates a new `String`.
+A `String` follows the same rules as a struct ([Ownership](07-ownership.md)): assigning it to a variable gives that variable its own copy, and so does passing it to a value parameter. The only difference is the literal: each time `"text"` is evaluated, it creates a new `String`.
 
 ```nirea
 void shout(String text) {                // a value parameter: receives a copy
@@ -57,10 +56,9 @@ void main() {
     shout(a);
     println(a);                          // hi: the caller's string is unchanged
 
-    String b = a;                        // a is no longer usable
-    String c = b.copy();                 // b and c are both usable
-    c.appendChar('?');
-    println(b + " " + c);                // hi hi?
+    String b = a;                        // a copy: a and b are both usable
+    b.appendChar('?');
+    println(a + " " + b);                // hi hi?
 
     String twice = "ab";
     twice.append(twice);                 // append takes a copy of its argument

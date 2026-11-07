@@ -81,7 +81,7 @@ boolean same(Point* a, Point* b) {
 void main() {
     Point a = Point();
     a.x = 1;
-    Point b = a.copy();
+    Point b = a;                             // a copy
     println(a == b);                         // true
     b.y = 2;
     println(a == b);                         // false
