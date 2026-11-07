@@ -10,6 +10,6 @@ void main() {
     Engine* reference = engine;
     for (int i = 0; i < 3; i++) {
         reference.power = i; // error: may have ended on some path
-        Engine copy = engine.copy();
+        Engine copy = engine;
     }
 }

@@ -1,5 +1,5 @@
-// An ownership transfer followed by break never reaches another iteration, so it
-// isn't a use after transfer: transfers are followed through all control flow (§7.1).
+// A move followed by break never reaches another iteration, so the variable
+// isn't used afterwards and its object moves (§7.2).
 
 struct Engine {
     int power;

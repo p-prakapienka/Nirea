@@ -11,6 +11,7 @@ void addFrom(Counter* target, Counter* source) {
 
 void main() {
     Counter counter = Counter();
-    addFrom(counter, counter.copy());
+    Counter other = counter;
+    addFrom(counter, other);
     addFrom(counter, counter); // error: this call changes counter (argument 1)
 }

@@ -20,14 +20,14 @@ struct Store {
     void grow() {
         Entry[] bigger = Entry[entries.length + 1];
         for (int i = 0; i < entries.length; i++) {
-            bigger[i] = entries[i].copy();
+            bigger[i] = entries[i];
         }
         entries = bigger;
     }
 
     void rename(int i, String name) {
         LOG.write("rename");           // may call back into STORE.grow()
-        entries[i].name = name.copy(); // reaches whatever array is there now
+        entries[i].name = name; // reaches whatever array is there now
         Entry* entry = entries[i];
         TEXT.measure(name);            // can't reach STORE: entry stays usable
         entry.rename(name);            // Entry.rename can't reach STORE either
@@ -38,7 +38,7 @@ struct Store {
     }
 
     String nameAt(int i) {
-        return entries[i].name.copy();
+        return entries[i].name;
     }
 }
 

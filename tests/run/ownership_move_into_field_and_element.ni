@@ -1,5 +1,6 @@
-// Ownership transfers into fields, array elements and array initialisers, and a
-// call result can be used in any of these positions (§7.1).
+// Locals move into fields, array elements and array initialisers when they
+// aren't used afterwards, and a call result can be used in any of these
+// positions (§7.1, §7.2).
 
 struct Engine {
     int power;

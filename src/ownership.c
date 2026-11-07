@@ -1,10 +1,14 @@
-/* Flow-sensitive checking of initialisation, ownership and references (spec
- * 6.8, 7.1, 9.3). Semantic analysis has already marked every local variable
- * whose object goes to a new owner (Expr.transfers_ownership). On each path,
- * this pass follows which locals have no value, because they were declared
- * without one or gave their object away, and which reference variables have
- * ended, and rejects later uses of them. It also rejects calls that reach the
- * same object in two ways.
+/* Flow-sensitive checking of initialisation, moves and references (spec 6.8,
+ * 7.2, 9.3). Semantic analysis has marked every local variable whose object
+ * goes to a new owner (Expr.transfers_ownership). On each path, this pass
+ * follows which locals have no value, because they were declared without one
+ * or their object moved, and which reference variables have ended. A use of
+ * a local declared without a value, or of a reference variable that has
+ * ended, is an error. A later use of a local whose object moved, directly or
+ * through a reference variable, instead turns the move into a copy
+ * (Expr.implicit_copy), and the function is checked again, until no move is
+ * followed by a use. The pass also rejects calls that reach the same object in
+ * two ways.
  *
  * Objects are compared as paths from a root (a local variable, a parameter or
  * `this`) through fields and array elements. Two objects overlap when one
@@ -17,14 +21,27 @@
 #include "sema.h"
 
 /* Per-variable state. For other locals: has a value, has none (declared
- * without one, or gave its object away), or has none on some paths. For
+ * without one, or its object moved), or has none on some paths. For
  * reference variables: usable, ended, or ended on some paths. */
 enum { USABLE = 0, GONE = 1, MAYBE_GONE = 2 };
 
+/* The moves that may have taken a local's object: one move (site), or the
+ * moves of two joined paths (a and b). */
+typedef struct Sites {
+    Expr *site;
+    struct Sites *a, *b;
+    int mark;
+} Sites;
+
+/* v holds a state for every local, followed (at v + v_bytes) by the Sites of
+ * each local whose object may have moved, NULL otherwise. */
 typedef struct State {
     uint8_t *v;
     bool reachable;
 } State;
+
+static int conversions; /* moves turned into copies in this check */
+static int sites_mark;
 
 typedef struct LoopCtx {
     State brk;
@@ -52,7 +69,6 @@ typedef struct OCtx {
     Decl *fn;
     int n;
     LoopCtx *loop;
-    Loc *transfer_loc;
     Loc *end_loc;            /* where each reference variable ended */
     const char **end_reason; /* why it ended */
     PathVec *targets;        /* objects each reference variable reaches */
@@ -251,29 +267,88 @@ static void order_globals(Program *prog, int g, uint8_t *state) {
     state[g] = 2;
 }
 
+static size_t v_bytes(OCtx *c) {
+    return ((size_t)(c->n ? c->n : 1) + 15) & ~(size_t)15;
+}
+
+static size_t state_bytes(OCtx *c) {
+    return v_bytes(c) + (size_t)(c->n ? c->n : 1) * sizeof(Sites *);
+}
+
+static Sites **moves_of(OCtx *c, State *s) {
+    return (Sites **)(void *)(s->v + v_bytes(c));
+}
+
 static State state_new(OCtx *c, bool reachable) {
     State s;
-    s.v = xcalloc((size_t)(c->n ? c->n : 1), 1);
+    s.v = xcalloc(state_bytes(c), 1);
     s.reachable = reachable;
     return s;
 }
 
 static State state_copy(OCtx *c, State *src) {
     State s = state_new(c, src->reachable);
-    memcpy(s.v, src->v, (size_t)c->n);
+    memcpy(s.v, src->v, state_bytes(c));
     return s;
+}
+
+static Sites *sites_join(Sites *x, Sites *y) {
+    if (x == y || !y) return x;
+    if (!x) return y;
+    Sites *u = NEW(Sites);
+    u->a = x;
+    u->b = y;
+    return u;
 }
 
 static void state_join(OCtx *c, State *dst, State *src) {
     if (!src->reachable) return;
     if (!dst->reachable) {
-        memcpy(dst->v, src->v, (size_t)c->n);
+        memcpy(dst->v, src->v, state_bytes(c));
         dst->reachable = true;
         return;
     }
+    Sites **dm = moves_of(c, dst), **sm = moves_of(c, src);
     for (int i = 0; i < c->n; i++) {
         if (dst->v[i] != src->v[i]) dst->v[i] = MAYBE_GONE;
+        dm[i] = sites_join(dm[i], sm[i]);
     }
+}
+
+/* Turns the moves in t into copies, since the object is used afterwards
+ * (spec 7.2). */
+static void keep_sites(Sites *t) {
+    if (!t || t->mark == sites_mark) return;
+    t->mark = sites_mark;
+    if (t->site) {
+        if (t->site->transfers_ownership) {
+            t->site->transfers_ownership = false;
+            t->site->implicit_copy = true;
+            conversions++;
+        }
+        return;
+    }
+    keep_sites(t->a);
+    keep_sites(t->b);
+}
+
+/* Local v, or a reference variable reaching it, is used: if its object may
+ * have moved, those moves become copies. Returns true if it had moved. */
+static bool keep_moved(OCtx *c, State *s, Var *v) {
+    if (!s->reachable || s->v[v->index] == USABLE) return false;
+    Sites **m = moves_of(c, s);
+    if (!m[v->index]) return false;
+    sites_mark++;
+    keep_sites(m[v->index]);
+    m[v->index] = NULL;
+    s->v[v->index] = USABLE;
+    return true;
+}
+
+/* The local's state when it is assigned or declared. */
+static void set_var(OCtx *c, State *s, Var *v, uint8_t st) {
+    s->v[v->index] = st;
+    moves_of(c, s)[v->index] = NULL;
 }
 
 static bool state_equal(OCtx *c, State *a, State *b) {
@@ -289,17 +364,6 @@ static bool tracked(Var *v) {
 
 static bool is_ref_var(Var *v) {
     return v->is_ref && v->kind == VAR_LOCAL;
-}
-
-/* The local variable whose storage an expression refers to, if any. */
-static Var *root_var(Expr *e) {
-    switch (e->kind) {
-    case E_VAR: return e->var;
-    case E_FIELD:
-    case E_INDEX:
-    case E_TO_IFACE: return root_var(e->base);
-    default: return NULL;
-    }
 }
 
 static Var *call_param(Expr *call, int i) {
@@ -444,7 +508,16 @@ static void end_overlapping(OCtx *c, State *s, PathVec *paths, Var *except, bool
 }
 
 static void use_ref_var(OCtx *c, Var *v, Loc loc, State *s) {
-    if (!s->reachable || s->v[v->index] == USABLE) return;
+    if (!s->reachable) return;
+    if (s->v[v->index] == USABLE) {
+        /* the objects it reaches must not have moved (spec 7.2) */
+        PathVec *t = &c->targets[v->index];
+        for (int i = 0; i < t->len; i++) {
+            Var *root = t->data[i].root;
+            if (root && tracked(root)) keep_moved(c, s, root);
+        }
+        return;
+    }
     if (error_suppress == 0) {
         if (s->v[v->index] == GONE) {
             error_at(loc, "'%s' can't be used here: the reference ended when its object was reached another way", v->name);
@@ -458,17 +531,25 @@ static void use_ref_var(OCtx *c, Var *v, Loc loc, State *s) {
     }
 }
 
-/* ---- Ownership transfers (spec 7.1) ---- */
+/* ---- Moves (spec 7.2) ---- */
 
-/* Reports a local that a call or assignment refers to (as receiver,
- * reference argument or assignment target) but that gave its object to a new
- * owner while the call's arguments or the assigned value were evaluated
- * (spec 7.3). before is the state just after the reference was taken. */
-static void check_still_owned(OCtx *c, Var *v, State *before, State *after, Loc fallback, const char *what) {
-    if (!v || !tracked(v) || !before->reachable || !after->reachable) return;
-    if (before->v[v->index] != USABLE || after->v[v->index] == USABLE) return;
-    Loc loc = c->transfer_loc[v->index].file ? c->transfer_loc[v->index] : fallback;
-    error_at(loc, "'%s' can't be given to a new owner while %s refers to it", v->name, what);
+/* A call or assignment refers to place (as receiver, reference argument or
+ * assignment target), and the locals it reaches must keep their objects
+ * while the call's arguments or the assigned value are evaluated: any that
+ * moved meanwhile is copied instead. before is the state just after the
+ * reference was taken. */
+static void keep_still_owned(OCtx *c, Expr *place, State *before, State *after) {
+    if (!before->reachable || !after->reachable) return;
+    PathVec paths = {0};
+    if (!place_paths(c, place, &paths)) {
+        free(paths.data);
+        return;
+    }
+    for (int i = 0; i < paths.len; i++) {
+        Var *v = paths.data[i].root;
+        if (v && tracked(v) && before->v[v->index] == USABLE) keep_moved(c, after, v);
+    }
+    free(paths.data);
 }
 
 /* True if every value e can produce is a new object (a call result), never
@@ -480,7 +561,6 @@ static bool is_new_object(Expr *e) {
     case E_CALL_IFACE: return !is_ref_call(e);
     case E_CALL_CTOR:
     case E_CALL_STRING:
-    case E_COPY:
     case E_NEW_ARRAY:
     case E_STRING:
     case E_CONST:
@@ -494,8 +574,9 @@ static bool is_new_object(Expr *e) {
     }
 }
 
-/* A switch expression of an owned type outside a transfer position would act
- * on a hidden copy of an existing object (spec 10.1). */
+/* A switch expression of an owned type outside a position where its result
+ * gets an owner would work on a copy of an existing object, which is then
+ * lost (spec 10.1). */
 static void check_switch_result(Expr *e) {
     if (e->transfers_ownership || !e->type || !type_is_owned(e->type)) return;
     for (int i = 0; i < e->sw->arms.len; i++) {
@@ -503,8 +584,8 @@ static void check_switch_result(Expr *e) {
         if (arm->kind == E_SWITCH) continue; /* checked when visited */
         if (!is_new_object(arm)) {
             error_at(arm->loc,
-                     "this switch branch refers to an existing %s, which the switch would copy implicitly; use the "
-                     "switch where its result gets an owner (e.g. %s value = switch ...), or call .copy()",
+                     "this switch branch refers to an existing %s, which the switch would copy, and the copy would be "
+                     "lost; use the switch where its result gets an owner, as in '%s value = switch ...'",
                      type_name(e->type), type_name(e->type));
         }
     }
@@ -517,34 +598,24 @@ static void use_var(OCtx *c, Expr *e, State *s) {
         return;
     }
     if (!tracked(v) || !s->reachable) return;
-    uint8_t st = s->v[v->index];
-    if (st != USABLE) {
-        if (error_suppress == 0 && !c->transfer_loc[v->index].file) {
-            /* declared without a value (spec 6.8) */
-            if (st == GONE) {
-                error_at(e->loc, "'%s' can't be used here: it has no value yet; assign one to it first", v->name);
-            } else {
-                error_at(e->loc, "'%s' can't be used here: it may have no value on some path; assign one to it on every "
-                                 "path first",
-                         v->name);
-            }
-            note_at(v->loc, "'%s' is declared here without a value", v->name);
-            s->v[v->index] = USABLE; /* report each use only once */
-        } else if (error_suppress == 0) {
-            if (st == GONE) {
-                error_at(e->loc, "'%s' can't be used here: its object was given to a new owner", v->name);
-            } else {
-                error_at(e->loc, "'%s' can't be used here: its object may have been given to a new owner on some path",
-                         v->name);
-            }
-            if (c->transfer_loc[v->index].file) note_at(c->transfer_loc[v->index], "ownership of '%s' was transferred here", v->name);
-            s->v[v->index] = USABLE; /* report each use only once */
+    if (s->v[v->index] != USABLE && !keep_moved(c, s, v)) {
+        /* declared without a value (spec 6.8) */
+        if (s->v[v->index] == GONE) {
+            error_at(e->loc, "'%s' can't be used here: it has no value yet; assign one to it first", v->name);
+        } else {
+            error_at(e->loc, "'%s' can't be used here: it may have no value on some path; assign one to it on every "
+                             "path first",
+                     v->name);
         }
-        return;
+        note_at(v->loc, "'%s' is declared here without a value", v->name);
+        s->v[v->index] = USABLE; /* report each use only once */
     }
     if (e->transfers_ownership) {
+        /* the object moves, unless the variable is used afterwards (spec 7.2) */
+        Sites *site = NEW(Sites);
+        site->site = e;
         s->v[v->index] = GONE;
-        if (error_suppress == 0 || !c->transfer_loc[v->index].file) c->transfer_loc[v->index] = e->loc;
+        moves_of(c, s)[v->index] = site;
     }
 }
 
@@ -652,7 +723,9 @@ static void check_call_reach(OCtx *c, Expr *e) {
             Reach *other = later_changes ? &reaches.data[i] : &reaches.data[j];
             Path *changed = &changer->paths.data[later_changes ? b : a];
             Path *received = &other->paths.data[later_changes ? a : b];
-            error_at(reaches.data[j].loc, "this call changes %s (%s), so it can't also receive %s (%s); pass a copy with .copy()",
+            error_at(reaches.data[j].loc,
+                     "this call changes %s (%s), so it can't also receive %s (%s); assign one of them to a variable to "
+                     "pass a copy",
                      changed->text, changer->who, received->text, other->who);
             break;
         }
@@ -707,7 +780,7 @@ static void check_global_reach(OCtx *c, Expr *e, State *s) {
             if (!found) continue;
             error_at(arg->loc,
                      "this call can reach global object '%s' while %s refers into it, which could leave the reference "
-                     "pointing at replaced memory; pass a copy (.copy()) instead",
+                     "pointing at replaced memory; assign it to a variable and pass that copy instead",
                      global->name, i < 0 ? "the object it is called on" : "this argument");
             if (via) note_reach_chain(via, g);
             else note_at(e->loc, "the call is made on '%s' itself", global->name);
@@ -732,9 +805,9 @@ static void visit_call(OCtx *c, Expr *e, State *s) {
         else visit_expr(c, e->args.data[i], s);
         before_arg[i] = state_copy(c, s);
     }
-    if (has_receiver(e)) check_still_owned(c, root_var(e->base), &after_receiver, s, e->loc, "this call");
+    if (has_receiver(e)) keep_still_owned(c, e->base, &after_receiver, s);
     for (int i = 0; i < e->args.len; i++) {
-        if (passed_by_reference(e, i)) check_still_owned(c, root_var(e->args.data[i]), &before_arg[i], s, e->loc, "this call");
+        if (passed_by_reference(e, i)) keep_still_owned(c, e->args.data[i], &before_arg[i], s);
         free(before_arg[i].v);
     }
     free(before_arg);
@@ -770,9 +843,8 @@ static void visit_expr(OCtx *c, Expr *e, State *s) {
     case E_THIS:
     case E_FIELD:
     case E_INDEX:
-    case E_TO_IFACE: use_place(c, e, s, NULL, e->kind == E_VAR && e->transfers_ownership); return;
+    case E_TO_IFACE: use_place(c, e, s, NULL, false); return; /* copying or moving only reads */
     case E_LENGTH:
-    case E_COPY:
     case E_CONVERT:
     case E_CAST:
     case E_UNARY: visit_expr(c, e->base, s); return;
@@ -896,8 +968,7 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
         if (st->init) visit_expr(c, st->init, s);
         if (s->reachable && tracked(st->var)) {
             /* without an initialiser, it has no value until assigned (spec 6.8) */
-            s->v[st->var->index] = st->init ? USABLE : GONE;
-            if (!st->init) c->transfer_loc[st->var->index] = (Loc){0};
+            set_var(c, s, st->var, st->init ? USABLE : GONE);
         }
         return;
     case S_EXPR: visit_expr(c, st->expr, s); return;
@@ -906,7 +977,7 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
             /* replacing a variable's object: references to the old one end */
             Var *whole = st->expr->var;
             visit_expr(c, st->value, s);
-            if (s->reachable && tracked(whole)) s->v[whole->index] = USABLE;
+            if (s->reachable && tracked(whole)) set_var(c, s, whole, USABLE);
             if (c->refs.len) {
                 PathVec paths = {0};
                 vec_push(paths, path_root(whole));
@@ -918,7 +989,7 @@ static void visit_stmt(OCtx *c, Stmt *st, State *s) {
         visit_operand(c, st->expr, s, NULL, true); /* the target is changed */
         State after_target = state_copy(c, s);
         visit_expr(c, st->value, s);
-        check_still_owned(c, root_var(st->expr), &after_target, s, st->loc, "this assignment");
+        keep_still_owned(c, st->expr, &after_target, s);
         free(after_target.v);
         return;
     }
@@ -1104,15 +1175,25 @@ static void infer_changes(Program *prog) {
     }
 }
 
+static void run_check(OCtx *c) {
+    size_t n = (size_t)(c->n ? c->n : 1);
+    c->loop = NULL;
+    c->end_loc = xcalloc(n, sizeof(Loc));
+    c->end_reason = xcalloc(n, sizeof(const char *));
+    c->targets = xcalloc(n, sizeof(PathVec));
+    State s = state_new(c, true);
+    visit_stmt(c, c->fn->body, &s);
+    free(s.v);
+    free(c->end_loc);
+    free(c->end_reason);
+    for (int i = 0; i < c->n; i++) free(c->targets[i].data);
+    free(c->targets);
+}
+
 static void check_function(Decl *fn) {
     OCtx c = {0};
     c.fn = fn;
     c.n = fn->locals.len;
-    size_t n = (size_t)(c.n ? c.n : 1);
-    c.transfer_loc = xcalloc(n, sizeof(Loc));
-    c.end_loc = xcalloc(n, sizeof(Loc));
-    c.end_reason = xcalloc(n, sizeof(const char *));
-    c.targets = xcalloc(n, sizeof(PathVec));
     for (int i = 0; i < fn->locals.len; i++) {
         if (is_ref_var(fn->locals.data[i])) vec_push(c.refs, fn->locals.data[i]);
     }
@@ -1123,14 +1204,15 @@ static void check_function(Decl *fn) {
             c.self_globals[g] = 1;
         }
     }
-    State s = state_new(&c, true);
-    visit_stmt(&c, fn->body, &s);
-    free(s.v);
-    free(c.transfer_loc);
-    free(c.end_loc);
-    free(c.end_reason);
-    for (int i = 0; i < c.n; i++) free(c.targets[i].data);
-    free(c.targets);
+    /* Moves followed by a use become copies, which can expose other moves
+     * followed by a use; once none is left, check again to report errors. */
+    do {
+        conversions = 0;
+        error_suppress++;
+        run_check(&c);
+        error_suppress--;
+    } while (conversions);
+    run_check(&c);
     free(c.refs.data);
     free(c.self_globals);
 }

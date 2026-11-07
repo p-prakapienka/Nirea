@@ -21,7 +21,7 @@ Person make(int n) {
 
 void main() {
     Person first = make(1);
-    Person second = first.copy();
+    Person second = first;
     second.name.append("x");
     println(first.name);                 // expect: 1
     println(second.name);                // expect: 1x

@@ -1,4 +1,4 @@
-// Arrays can be returned from functions; returning a local transfers ownership (§6.6, §7.1).
+// Arrays can be returned from functions; returning a local moves it to the caller (§6.6, §7.2).
 
 int[] squares() {
     int[] result = int[3];

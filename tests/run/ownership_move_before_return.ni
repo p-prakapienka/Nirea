@@ -1,4 +1,4 @@
-// An ownership transfer on a path that returns doesn't affect the code after it (§7.1).
+// A move on a path that returns doesn't affect the code after it (§7.2).
 
 struct Engine {
     int power;

@@ -8,8 +8,9 @@
  * - temporaries that nothing took ownership of, at the end of the statement
  *   (or of the conditional sub-expression) that created them;
  * - the old object when a variable, field or element is assigned.
- * A local that transfers ownership is reset to its zero value, which needs
- * no cleanup, so the generated code never needs drop flags. */
+ * A local whose object moves to a new owner (spec 7.2) is reset to its zero
+ * value, which needs no cleanup, so the generated code never needs drop
+ * flags. */
 #include "codegen.h"
 
 #include <math.h>
@@ -796,7 +797,7 @@ static void gen_new_array(CG *cg, const char *lvalue, Type *t, const char **size
 
 static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
     if (e->implicit_copy) {
-        /* an existing object passed to a value parameter is copied (spec 7.3) */
+        /* an existing object given to a new owner is copied (spec 7.1) */
         const char *p = is_ref_call(e) ? gen_call(cg, e, true) : gen_place(cg, e);
         const char *t = new_tmp(cg);
         emit(cg, "%s %s = %s;", ctype(e->type), t, copy_expr(e->type, p));
@@ -819,7 +820,7 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
         const char *v = var_ref(e->var);
         if (e->transfers_ownership && needs_drop(e->type)) {
             /* The new owner takes the object; the variable is left empty so
-             * that its own cleanup does nothing (spec 7.1). */
+             * that its own cleanup does nothing (spec 7.2). */
             const char *t = new_tmp(cg);
             emit(cg, "%s %s = %s;", ctype(e->type), t, v);
             emit(cg, "%s = %s;", v, zero_value(e->type));
@@ -858,13 +859,6 @@ static const char *gen_expr_impl(CG *cg, Expr *e, bool want_value) {
         const char *a = gen_lvalue(cg, e->base);
         const char *b = gen_lvalue(cg, e->args.data[0]);
         return eq_expr(e->base->type, a, b);
-    }
-    case E_COPY: {
-        const char *p = gen_lvalue(cg, e->base);
-        const char *t = new_tmp(cg);
-        emit(cg, "%s %s = %s;", ctype(e->type), t, copy_expr(e->type, p));
-        add_temp(cg, t, e->type);
-        return t;
     }
     case E_CALL_FUNC:
     case E_CALL_METHOD:
