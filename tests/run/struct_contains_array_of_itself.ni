@@ -22,7 +22,7 @@ void main() {
     root.children[1].value = 3;
     root.children[1].children = Node[1];
     root.children[1].children[0].value = 4;
-    Node copy = root.copy();
+    Node copy = root;
     root.children[1].children[0].value = 40;
     println(total(root));            // expect: 46
     println(total(copy));            // expect: 10

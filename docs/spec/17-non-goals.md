@@ -7,7 +7,7 @@ The initial language deliberately excludes:
 - Class and struct inheritance.
 - Garbage collection.
 - User-visible raw pointers.
-- Implicit copying, except for value parameters ([§7.3](07-ownership.md#73-passing-values-and-references)).
+- Implicitly shared objects: without `*`, every variable, field, array element and parameter holds an object of its own ([§7.1](07-ownership.md#71-assignment-copies)).
 - Implicit narrowing conversions.
 - Property syntactic sugar.
 - Implicit getter/setter generation.

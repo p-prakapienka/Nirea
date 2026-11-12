@@ -187,7 +187,7 @@ void main() {
 }
 ```
 
-A global object is used only by calling its methods: `USERS.save(user)`. It can't be used as a value, so it can't be assigned, given to a new owner, copied, compared or passed as an argument, and its fields can't be used through its name, even when they are public. Its methods that return a reference ([§9.2](09-references.md#92-returning-references)) can't be called on it. Inside its methods, its fields are used through `this`, as for any struct value. A struct type with a global object can still have ordinary local values.
+A global object is used only by calling its methods: `USERS.save(user)`. It can't be used as a value, so it can't be assigned, copied, compared or passed as an argument, and its fields can't be used through its name, even when they are public. Its methods that return a reference ([§9.2](09-references.md#92-returning-references)) can't be called on it. Inside its methods, its fields are used through `this`, as for any struct value. A struct type with a global object can still have ordinary local values.
 
 To choose an implementation, for example in tests, a global object can forward each call to another one:
 

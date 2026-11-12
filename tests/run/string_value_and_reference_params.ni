@@ -11,7 +11,7 @@ void exclaim(String* text) {
 
 void main() {
     String hello = "hello";
-    String loud = shout(hello.copy());
+    String loud = shout(hello);
     println(hello);                      // expect: hello
     println(loud);                       // expect: hello!
     exclaim(hello);

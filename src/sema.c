@@ -305,7 +305,7 @@ static void collect_decl(Program *prog, Decl *d) {
                 vec_push(prog->all_functions, m);
                 continue;
             }
-            if ((m->name == name_copy || m->name == name_equals) && m->kind == D_METHOD) {
+            if (m->name == name_equals && m->kind == D_METHOD) {
                 error_at(m->loc, "'%s' is built in for every struct and can't be declared as a method", m->name);
                 continue;
             }
@@ -641,7 +641,7 @@ static void wrap_to_iface(Expr **pe, Type *iface) {
 /* Expressions                                                             */
 
 static Type *check_value(Ctx *ctx, Expr *e, Type *expected);
-static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument);
+static void mark_owner_value(Expr *e);
 static void check_switch(Ctx *ctx, SwitchData *sw, Loc loc, bool is_expr, Expr *e, Type *expected);
 
 static Type *set_type(Expr *e, Type *t) {
@@ -848,8 +848,6 @@ static void resolve_path(Ctx *ctx, Expr *e) {
         }
         if (m && m->kind == D_METHOD) {
             error_at(e->loc, "method '%s' must be called: %s()", e->name, e->name);
-        } else if (e->name == name_copy) {
-            error_at(e->loc, "'copy' is a method and must be called: copy()");
         } else {
             error_at(e->loc, "struct '%s' has no field '%s'", type_name(bt), e->name);
         }
@@ -916,7 +914,7 @@ static void check_args(Ctx *ctx, Expr *call, Decl *fn, const char *fn_desc) {
             if (!is_error(at) && at != pt) {
                 error_at(arg->loc, "%s: expected %s, found %s", what, type_name(pt), type_name(at));
             } else if (!fn->params.data[i]->is_ref) {
-                check_transfer_source(ctx, arg, true); /* value parameter: ownership is transferred */
+                mark_owner_value(arg); /* a value parameter gets its own object (spec 7.3) */
             }
             continue;
         }
@@ -1046,7 +1044,7 @@ static Type *check_string_of(Ctx *ctx, Expr *e, const char *name, Loc loc) {
         Type *t = check_value(ctx, e->args.data[i], NULL);
         if (!is_error(t) && !(type_is_numeric(t) || t == type_bool || t == type_char || t->kind == TY_ENUM)) {
             error_at(e->args.data[i]->loc, "String.of needs a primitive or enum value, found %s%s", type_name(t),
-                     t == type_string ? "; use copy() to copy a String" : "");
+                     t == type_string ? "; to copy a String, assign it to a variable" : "");
         }
     }
     return set_type(e, type_string);
@@ -1058,16 +1056,17 @@ static Type *call_method_on(Ctx *ctx, Expr *e, Expr *receiver, const char *name,
         for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
         return set_type(e, type_error);
     }
-    if (receiver->kind == E_GLOBAL && (name == name_copy || name == name_equals)) {
-        error_at(loc, "global object '%s' can't be copied or compared; call one of its methods", receiver->decl->name);
+    if (receiver->kind == E_GLOBAL && name == name_equals) {
+        error_at(loc, "global object '%s' can't be compared; call one of its methods", receiver->decl->name);
         for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
         return set_type(e, type_error);
     }
-    if (name == name_copy && type_is_owned(rt)) {
-        e->kind = E_COPY;
-        e->base = receiver;
-        if (e->args.len) error_at(e->loc, "copy() takes no arguments");
-        return set_type(e, rt);
+    if (name == name_copy && type_is_owned(rt) && !(rt->kind == TY_STRUCT && map_get(&rt->decl->member_map, name))) {
+        /* copying is assignment (spec 7.1, 7.2) */
+        error_at(loc, "there is no copy() method: assigning an object to a variable copies it, as in '%s other = ...;'",
+                 type_name(rt));
+        for (int i = 0; i < e->args.len; i++) check_value(ctx, e->args.data[i], NULL);
+        return set_type(e, type_error);
     }
     if (name == name_equals && type_is_owned(rt)) {
         /* compares the values both sides refer to, in place (spec 6.9) */
@@ -1577,24 +1576,8 @@ static Type *check_value(Ctx *ctx, Expr *e, Type *expected) {
 }
 
 /* ---------------------------------------------------------------------- */
-/* Ownership transfers and assignment targets (spec 7.1, 7.3)             */
+/* Owned values and assignment targets (spec 7.1, 7.3)                   */
 
-static const char *place_description(Expr *e) {
-    switch (e->kind) {
-    case E_FIELD: return "a field";
-    case E_INDEX: return "an array element";
-    case E_THIS: return "'this'";
-    case E_VAR:
-        if (!e->var->is_ref) return "a variable";
-        return e->var->kind == VAR_PARAM ? "a reference parameter" : "a reference variable";
-    default: return "the value of this expression";
-    }
-}
-
-/* Validates an owned value in a position where ownership is transferred:
- * variable initialiser, assignment, return, value argument, array
- * initialiser element or switch arm. Only whole local variables (including
- * value parameters) and call results can go to a new owner (spec 7.1, 7.3). */
 /* True for expressions that produce a new object nothing else owns. */
 static bool is_new_object(Expr *e) {
     switch (e->kind) {
@@ -1603,77 +1586,36 @@ static bool is_new_object(Expr *e) {
     case E_CALL_IFACE: return !is_ref_call(e);
     case E_CALL_CTOR:
     case E_CALL_STRING:
-    case E_COPY:
     case E_NEW_ARRAY:
     case E_STRING:
     case E_CONST:
-    case E_BINARY: return true;
+    case E_BINARY: return true; /* E_BINARY is a string concatenation */
     default: return false;
     }
 }
 
-/* Marks existing objects in e to be copied instead of transferred. */
-static void mark_implicit_copy(Expr *e) {
-    if (e->kind == E_SWITCH) {
-        e->transfers_ownership = true; /* the result gets an owner (spec 10.1) */
-        for (int i = 0; i < e->sw->arms.len; i++) {
-            if (e->sw->arms.data[i].expr) mark_implicit_copy(e->sw->arms.data[i].expr);
-        }
-        return;
-    }
-    if (!is_new_object(e)) e->implicit_copy = true;
-}
-
-static void check_transfer_source(Ctx *ctx, Expr *e, bool is_argument) {
-    (void)ctx;
+/* Marks an owned value in a position where it gets an owner: a variable
+ * initialiser, an assignment, a return, an argument for a value parameter,
+ * an array initialiser element or a switch arm in one of these. The owner gets
+ * an object of its own (spec 7.1): a new object as it is, and any existing
+ * object copied. A whole local variable is marked as transferring; the
+ * ownership pass turns that into a copy unless the variable isn't used
+ * afterwards, when its object moves (spec 7.2). */
+static void mark_owner_value(Expr *e) {
     if (is_error(e->type) || !type_is_owned(e->type)) return;
-    /* Value parameters receive copies of any object (spec 7.3). */
-    if (is_argument) {
-        mark_implicit_copy(e);
-        return;
-    }
     switch (e->kind) {
     case E_VAR:
-        if (e->var->is_ref) {
-            if (e->var->kind == VAR_PARAM) {
-                error_at(e->loc, "'%s' refers to the caller's object, which stays with its owner; use %s.copy()",
-                         e->var->name, e->var->name);
-            } else {
-                error_at(e->loc, "'%s' is a reference, and its object stays with its owner; use %s.copy()",
-                         e->var->name, e->var->name);
-            }
-            return;
-        }
-        e->transfers_ownership = true;
+        if (e->var->is_ref) e->implicit_copy = true;
+        else e->transfers_ownership = true;
         return;
-    case E_CALL_FUNC:
-    case E_CALL_METHOD:
-    case E_CALL_IFACE:
-        if (is_ref_call(e)) {
-            error_at(e->loc, "'%s' returns a reference, and its object stays with its owner; use .copy()", e->decl->name);
-        }
-        return;
-    case E_CALL_CTOR:
-    case E_CALL_STRING:
-    case E_COPY:
-    case E_NEW_ARRAY:
-    case E_STRING:
-    case E_CONST:
-    case E_BINARY: return; /* new objects; E_BINARY is a string concatenation */
     case E_SWITCH:
         e->transfers_ownership = true; /* the result gets an owner (spec 10.1) */
         for (int i = 0; i < e->sw->arms.len; i++) {
-            if (e->sw->arms.data[i].expr) check_transfer_source(ctx, e->sw->arms.data[i].expr, is_argument);
+            if (e->sw->arms.data[i].expr) mark_owner_value(e->sw->arms.data[i].expr);
         }
         return;
     default:
-        if (is_argument) {
-            error_at(e->loc, "%s stays with its owner and can't be passed by value; pass a copy with .copy(), or declare "
-                             "the parameter as a reference (%s*)",
-                     place_description(e), type_name(e->type));
-        } else {
-            error_at(e->loc, "%s stays with its owner and can't be given to a new owner; use .copy()", place_description(e));
-        }
+        if (!is_new_object(e)) e->implicit_copy = true;
         return;
     }
 }
@@ -2093,7 +2035,7 @@ static void check_array_init(Ctx *ctx, Expr *init, Type *t) {
             if (!is_error(et) && et != t->elem) {
                 error_at(el->loc, "array element: expected %s, found %s", type_name(t->elem), type_name(et));
             } else {
-                check_transfer_source(ctx, el, false);
+                mark_owner_value(el);
             }
         } else {
             coerce(&init->args.data[i], t->elem, "array element");
@@ -2115,7 +2057,7 @@ static void check_initialiser(Ctx *ctx, Var *v, Expr **pinit) {
             error_at(init->loc, "initialiser of '%s': expected %s, found %s", v->name, type_name(t), type_name(it));
             return;
         }
-        check_transfer_source(ctx, init, false);
+        mark_owner_value(init);
         return;
     }
     coerce(pinit, t, fmt_str("initialiser of '%s'", v->name));
@@ -2143,7 +2085,7 @@ static void check_assign(Ctx *ctx, Stmt *s) {
                 error_at(s->value->loc, "assignment: expected %s, found %s", type_name(tt), type_name(vt));
                 return;
             }
-            check_transfer_source(ctx, s->value, false);
+            mark_owner_value(s->value);
             return;
         }
         if (tt->kind == TY_INTERFACE) return;
@@ -2203,7 +2145,7 @@ static void check_stmt(Ctx *ctx, Stmt *s) {
             return;
         }
         if (e->kind != E_CALL_FUNC && e->kind != E_CALL_METHOD && e->kind != E_CALL_IFACE && e->kind != E_CALL_CTOR &&
-            e->kind != E_CALL_PRINT && e->kind != E_CALL_STRING && e->kind != E_COPY && e->kind != E_EQUALS &&
+            e->kind != E_CALL_PRINT && e->kind != E_CALL_STRING && e->kind != E_EQUALS &&
             !is_error(e->type)) {
             error_at(e->loc, "this expression isn't a statement; only calls can be used as statements");
         }
@@ -2283,7 +2225,7 @@ static void check_stmt(Ctx *ctx, Stmt *s) {
                 error_at(s->expr->loc, "return value: expected %s, found %s", type_name(rt), type_name(t));
                 return;
             }
-            check_transfer_source(ctx, s->expr, false);
+            mark_owner_value(s->expr);
             return;
         }
         coerce(&s->expr, rt, "return value");

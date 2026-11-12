@@ -1,4 +1,4 @@
-// Returning a local variable transfers ownership to the caller (§7.1).
+// Returning a local variable moves its object to the caller (§7.2).
 
 struct Engine {
     int power;

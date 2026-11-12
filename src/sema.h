@@ -7,7 +7,8 @@
  * through error_at; check error_count afterwards. */
 void sema_check_program(Program *prog);
 
-/* Checks ownership transfers (spec section 7). Run after sema succeeds. */
+/* Checks initialisation, moves and references (spec 6.8, 7, 9). Run after
+ * sema succeeds. */
 void ownership_check_program(Program *prog);
 
 #endif

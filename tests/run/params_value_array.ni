@@ -14,7 +14,7 @@ void double(int[]* values) {
 
 void main() {
     int[] values = {1, 2, 3};
-    println(sumAndClear(values.copy()));  // expect: 6
+    println(sumAndClear(values));  // expect: 6
     println(values[0]);                   // expect: 1
     double(values);
     println(values[2]);                   // expect: 6

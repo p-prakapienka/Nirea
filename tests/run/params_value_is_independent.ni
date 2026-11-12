@@ -16,7 +16,7 @@ void bumpReference(Counter* counter) {
 void main() {
     Counter counter = Counter();
     counter.value = 1;
-    bumpValue(counter.copy());        // expect: 101
+    bumpValue(counter);        // expect: 101
     println(counter.value);           // expect: 1
     bumpReference(counter);
     println(counter.value);           // expect: 2

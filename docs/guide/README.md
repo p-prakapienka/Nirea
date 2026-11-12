@@ -8,7 +8,7 @@ This guide teaches Nirea by example, one topic per page. It assumes you know a l
 - [4. Arrays](04-arrays.md): Java-style arrays.
 - [5. Structs and interfaces](05-structs.md): fields, methods, constructors, `private`, equality and interfaces.
 - [6. Enums](06-enums.md): named values and exhaustive switches.
-- [7. Ownership](07-ownership.md): owners, transfers, copies and value parameters.
+- [7. Ownership](07-ownership.md): owners, copies, moves and value parameters.
 - [8. References](08-references.md): working on an object in place, many readers, and returning references.
 - [9. Global objects](09-global-objects.md): objects that belong to the whole program.
 - [10. Namespaces and projects](10-projects.md): namespaces, imports and the project layout.

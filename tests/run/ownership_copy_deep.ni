@@ -1,5 +1,5 @@
-// copy() makes a deep, independent copy: owned fields and elements are
-// copied too (§7.2).
+// Assignment makes a deep, independent copy: owned fields and elements are
+// copied too (§7.1).
 
 struct Engine {
     int power;
@@ -24,7 +24,7 @@ void main() {
     original.wheels[0] = 1;
     original.spares[1].power = 7;
 
-    Vehicle duplicate = original.copy();
+    Vehicle duplicate = original;
     duplicate.name = "second";
     duplicate.engine.power = 200;
     duplicate.wheels[0] = 2;

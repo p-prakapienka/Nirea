@@ -7,7 +7,7 @@ A reference, written `T*`, refers to an object where it is in memory, without ow
 - reference variables ([§9.1](#91-reference-variables));
 - results of functions and methods that return a reference ([§9.2](#92-returning-references)).
 
-Only struct, array, `String` and interface types have references. A reference never owns its object: it can't give the object to a new owner ([§7.1](07-ownership.md#71-ownership-transfer)), and nothing is destroyed when a reference ends. To get an independent object from a reference, call `copy()`, or pass it to a value parameter, which receives a copy ([§7.3](07-ownership.md#73-passing-values-and-references)).
+Only struct, array, `String` and interface types have references. A reference never owns its object, and nothing is destroyed when a reference ends. Assigning a reference to a variable or field without `*`, returning it as a value or passing it to a value parameter gives the new owner a copy of its object ([§7.1](07-ownership.md#71-assignment-copies)).
 
 ## 9.1 Reference variables
 
@@ -22,7 +22,7 @@ void main() {
 }
 ```
 
-The initialiser must be an existing object: a local variable, a parameter, `this`, a field or array element of one of these, another reference, or a call that returns a reference. A reference can't refer to a temporary object, such as a constructor call, a string literal, `copy()` or a call that returns a value. A reference variable of an interface type can refer to any struct value that implements the interface: `Drawable* shape = circle;`.
+The initialiser must be an existing object: a local variable, a parameter, `this`, a field or array element of one of these, another reference, or a call that returns a reference. A reference can't refer to a temporary object, such as a constructor call, a string literal or a call that returns a value. A reference variable of an interface type can refer to any struct value that implements the interface: `Drawable* shape = circle;`.
 
 A reference variable is set once, when it is declared. Assigning to it as a whole is an error:
 
@@ -58,7 +58,7 @@ void main() {
     Builder builder = Builder();
     builder.setWidth(10).setHeight(20);     // both calls change builder
     Builder* same = builder.setWidth(30);   // a reference to builder
-    Builder other = builder.setWidth(40);   // error: a reference can't give its object to a new owner; use .copy()
+    Builder other = builder.setWidth(40);   // a copy of builder
 }
 ```
 
@@ -68,9 +68,9 @@ The caller can use the result directly, as in the chained calls above, or store 
 
 ## 9.3 Reading and changing
 
-An object can be read through any number of references at once, but it can be changed only while nothing else uses it. So an object can't be changed, replaced or given away while a reference into it is still in use, and every reference stays valid.
+An object can be read through any number of references at once, but it can be changed only while nothing else uses it. So an object can't be changed or replaced while a reference into it is still in use, and every reference stays valid.
 
-Changing an object means assigning to it or to one of its parts, using `++`, `--` or a compound assignment on it, calling a method that changes `this`, passing it to a reference parameter that the function changes, calling `append`, `appendChar` or `setCharAt` on a `String`, or giving it to a new owner. Anything else, such as reading its fields, calling methods that don't change `this`, copying it or comparing it, only reads it.
+Changing an object means assigning to it or to one of its parts, using `++`, `--` or a compound assignment on it, calling a method that changes `this`, passing it to a reference parameter that the function changes, or calling `append`, `appendChar` or `setCharAt` on a `String`. Anything else, such as reading its fields, calling methods that don't change `this`, copying it or comparing it, only reads it.
 
 Nothing marks which methods change `this` or which reference parameters a function changes: the compiler works it out from the code. A method changes `this` if its body changes `this` or a part of it, directly or through a call, and a function changes a reference parameter in the same way. An interface method changes `this` if any of its implementations does. A reference variable is *changing* if its object is changed through it, and *reading* otherwise.
 
@@ -93,19 +93,20 @@ println(vehicle.engine.power);       // any other use ends a changing reference
 engine.power = 130;                  // error: engine can no longer be used
 ```
 
-Using a reference variable, including passing it to a reference parameter, doesn't end it. Reference parameters and `this` never end: using an object through them ends the reference variables that overlap it, as above. A reference variable that has ended stays ended until the end of its scope. As with ownership transfers ([§7.1](07-ownership.md#71-ownership-transfer)), the compiler follows this through all control flow: using a reference variable that has ended, or may have ended on some path, is a compile-time error.
+Using a reference variable, including passing it to a reference parameter, doesn't end it. Reference parameters and `this` never end: using an object through them ends the reference variables that overlap it, as above. A reference variable that has ended stays ended until the end of its scope. As with initialisation ([§6.8](06-types.md#68-zero-values-and-initialisation)), the compiler follows this through all control flow: using a reference variable that has ended, or may have ended on some path, is a compile-time error.
 
 A call can receive the same object, or overlapping objects, more than once, as the object it is called on and as arguments for reference parameters, as long as it changes none of them. If it changes one of them, that one can't overlap the others:
 
 ```nirea
 total(counter, counter);             // ok: total only reads both parameters
 addFrom(counter, counter);           // error: addFrom changes its first parameter
-addFrom(counter, counter.copy());    // ok
+Counter other = counter;             // a copy
+addFrom(counter, other);             // ok
 ```
 
 Arguments for value parameters are copies ([§7.3](07-ownership.md#73-passing-values-and-references)), so they never overlap.
 
-Because an object can't be changed while another reference into it is in use, replacing an object or giving it to a new owner can't leave a reference to the old object behind.
+Because an object can't be changed while another reference into it is in use, replacing an object can't leave a reference to the old object behind. An object moves to a new owner only when nothing uses it afterwards ([§7.2](07-ownership.md#72-moving-instead-of-copying)), so a move can't either.
 
 ### References into global objects
 

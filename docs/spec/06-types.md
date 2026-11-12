@@ -89,7 +89,7 @@ Floating-point arithmetic follows IEEE 754: division or remainder by zero produc
 
 ## 6.5 Strings
 
-`String` is a built-in object type holding a sequence of bytes. A `String` follows exactly the same rules as a struct ([§7](07-ownership.md)): assigning it or returning it transfers ownership, passing it to a value parameter passes a copy ([§7.3](07-ownership.md#73-passing-values-and-references)), a `String*` parameter refers to it in place, and `copy()` creates an independent copy. A `String` field or array element is part of its owner. Each `String` has its own bytes, freed automatically when its owner ends ([§7.6](07-ownership.md#76-resource-lifecycle)).
+`String` is a built-in object type holding a sequence of bytes. A `String` follows exactly the same rules as a struct ([§7](07-ownership.md)): assigning it, returning it or passing it to a value parameter gives the new owner its own copy ([§7.1](07-ownership.md#71-assignment-copies)), and a `String*` parameter refers to it in place. A `String` field or array element is part of its owner. Each `String` has its own bytes, freed automatically when its owner ends ([§7.6](07-ownership.md#76-resource-lifecycle)).
 
 The only difference from a struct is the string literal: `"text"` creates a new `String` object each time it is evaluated, so it can initialise or be assigned to any `String` variable. A `String` can be changed through its methods; changes never affect other `String` objects.
 
@@ -99,12 +99,10 @@ greeting.append(", Nirea");
 greeting.appendChar('!');
 println(greeting);                 // Hello, Nirea!
 
-String copy = greeting.copy();    // both stay usable
-copy.setCharAt(0, 'J');
+String other = greeting;           // a copy: both stay usable
+other.setCharAt(0, 'J');
 println(greeting);                 // Hello, Nirea!
-println(copy);                     // Jello, Nirea!
-
-String moved = greeting;           // greeting is no longer accessible
+println(other);                    // Jello, Nirea!
 ```
 
 Built-in methods:
@@ -121,7 +119,6 @@ Built-in methods:
 | `int toInt()`                        | The text parsed as an `int`                                              |
 | `int64 toInt64()`                    | The text parsed as an `int64`                                            |
 | `float64 toFloat64()`                | The text parsed as a `float64`                                           |
-| `String copy()`                      | An independent copy ([§7.2](07-ownership.md#72-explicit-copying))                                               |
 | `boolean equals(String text)`        | Whether both strings hold the same bytes ([§6.9](#69-equality))                          |
 
 The `String` arguments of `append`, `indexOf` and `equals` are value parameters ([§7.3](07-ownership.md#73-passing-values-and-references)), so a string can be passed to its own methods: `s.append(s)` doubles `s`, and `s.indexOf(s)` is `0`.
@@ -130,7 +127,7 @@ The `String` arguments of `append`, `indexOf` and `equals` are value parameters 
 
 An index outside the string (for `charAt` and `setCharAt`, outside `0` to `length() - 1`; for `substring`, unless `0 <= from <= to <= length()`) is a runtime error, as for arrays ([§6.4](#64-arithmetic-and-runtime-errors)). `toInt`, `toInt64` and `toFloat64` accept an optional `-` or `+` followed by a decimal number, with a fractional part and exponent only for `toFloat64` (which also accepts `NaN`, `Infinity` and `-Infinity`). Anything else, including a value out of range for the type, is a runtime error.
 
-`a + b` creates a new `String` holding the bytes of `a` followed by the bytes of `b`. Both operands must be strings; other values are converted explicitly with `String.of`, as in `"count: " + String.of(count)`. The operands are used in place, like `String*` parameters: they don't change and don't transfer ownership, and either can be a reference. `a += b` appends `b` to `a`, with the same result as `a = a + b`; like any assignment it needs a variable, field or array element on the left, so through a `String*` reference use `append`.
+`a + b` creates a new `String` holding the bytes of `a` followed by the bytes of `b`. Both operands must be strings; other values are converted explicitly with `String.of`, as in `"count: " + String.of(count)`. The operands are used in place, like `String*` parameters: they don't change and aren't copied, and either can be a reference. `a += b` appends `b` to `a`, with the same result as `a = a + b`; like any assignment it needs a variable, field or array element on the left, so through a `String*` reference use `append`.
 
 ```nirea
 String name = "Nirea";
@@ -163,7 +160,7 @@ float[] samples = float[size];                     // the length can be computed
 - An array initialiser `{...}` creates an array with one element per value. It can be used only to initialise a variable declaration.
 - `a[i]` accesses an element. The index can have any integer type. An index outside `0` to `a.length - 1` is a runtime error.
 - `a.length` is the number of elements, as an `int`.
-- Arrays are owned values, like structs: assignment transfers ownership of them and `copy()` copies them ([§7](07-ownership.md)). An array's elements are stored outside its owner, and freed with the array ([§7.6](07-ownership.md#76-resource-lifecycle)).
+- Arrays are owned objects, like structs: assigning an array gives the new owner its own copy ([§7.1](07-ownership.md#71-assignment-copies)). An array's elements are stored outside its owner, and freed with the array ([§7.6](07-ownership.md#76-resource-lifecycle)).
 - Arrays can be local variables, fields, elements of other arrays, parameters (by value or by reference, [§7.3](07-ownership.md#73-passing-values-and-references)) and return values. A reference to an array is written `int[]* values`.
 - Growable arrays, such as lists, are an open question ([§18](18-open-questions.md)).
 
@@ -196,7 +193,7 @@ circle = Circle();
 circle.radius = 2.0;           // ok
 ```
 
-This applies to every type, including numbers: `int count; count++;` is an error. Reading a variable, assigning to its fields or elements, calling a method on it, passing it to a function, `++`, `--` and compound assignments such as `+=` all use it. As with ownership transfers ([§7.1](07-ownership.md#71-ownership-transfer)), the compiler follows assignments through all control flow: a variable must have been assigned on every path that reaches a use. No value can be read uninitialised.
+This applies to every type, including numbers: `int count; count++;` is an error. Reading a variable, assigning to its fields or elements, calling a method on it, passing it to a function, `++`, `--` and compound assignments such as `+=` all use it. The compiler follows assignments through all control flow: a variable must have been assigned on every path that reaches a use. No value can be read uninitialised.
 
 ## 6.9 Equality
 
@@ -211,7 +208,7 @@ Both operands must be values of the same type, after implicit conversion for num
 
 A reference ([§9](09-references.md)) isn't a value, so using one as an operand of `==` or `!=` is a compile error, whether the other operand is a value or another reference. Readers coming from different languages would expect `==` on references to compare either addresses or values, so Nirea makes the comparison explicit: `a.equals(b)` compares the values `a` and `b` refer to, by structure, exactly as `==` compares two values. Nirea doesn't compare addresses.
 
-`equals` is built in for every struct, array and `String` type. The object it is called on is used in place, like `this`, and its argument is a value parameter ([§7.3](07-ownership.md#73-passing-values-and-references)), so `a.equals(a)` is allowed. Nothing changes owner. Either side can be a reference or a value, so `answer.equals("yes")` compares a `String*` parameter with a literal. Fields reached through a reference are values and can be compared with `==` directly (`a.x == b.x`). Interface values have no `equals`.
+`equals` is built in for every struct, array and `String` type. The object it is called on is used in place, like `this`, and its argument is a value parameter ([§7.3](07-ownership.md#73-passing-values-and-references)), so `a.equals(a)` is allowed. Nothing is copied: both objects are only read. Either side can be a reference or a value, so `answer.equals("yes")` compares a `String*` parameter with a literal. Fields reached through a reference are values and can be compared with `==` directly (`a.x == b.x`). Interface values have no `equals`. A struct can't declare its own method named `equals`; type-defined equality is an open question ([§18](18-open-questions.md)).
 
 ```nirea
 boolean sameContents(Engine* a, Engine* b) {

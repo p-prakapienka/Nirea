@@ -8,7 +8,7 @@ String find(int stop) {
             continue;
         }
         if (i == stop) {
-            String found = label.copy();
+            String found = label;
             found.append("!");
             return found;
         }

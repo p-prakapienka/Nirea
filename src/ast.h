@@ -129,7 +129,6 @@ typedef enum ExprKind {
     E_CALL_CTOR,   /* Struct(args) */
     E_CALL_PRINT,  /* print/println */
     E_CALL_STRING, /* built-in String method (base = receiver) or String.of (no base) */
-    E_COPY,        /* base.copy() */
     E_EQUALS,      /* base.equals(arg): structural comparison in place */
     E_LENGTH,      /* base.length */
     E_CONVERT,     /* implicit conversion of operand to type */
@@ -211,8 +210,8 @@ struct Expr {
     int enum_index;
     int iface_method_index;
     Decl *iface_impl_struct; /* E_TO_IFACE: struct being converted */
-    bool transfers_ownership; /* E_VAR whose object goes to a new owner */
-    bool implicit_copy;       /* existing object copied for a value parameter (spec 7.3) */
+    bool transfers_ownership; /* E_VAR whose object moves to a new owner (spec 7.2) */
+    bool implicit_copy;       /* existing object copied for a new owner (spec 7.1) */
     bool literal_untyped;    /* literal whose type came from the default, not context */
     bool untyped_literal;    /* literal, or arithmetic on literals only (set by the parser) */
     bool int_literal;        /* the same, with integer literals only */

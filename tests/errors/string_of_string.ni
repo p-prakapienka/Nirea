@@ -1,4 +1,4 @@
-// String.of takes primitive or enum values; copy() copies a String (§6.5).
+// String.of takes primitive or enum values; assigning a String copies it (§6.5).
 
 void main() {
     String a = "a";

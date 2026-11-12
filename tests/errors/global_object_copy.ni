@@ -7,5 +7,6 @@ struct Store {
 Store STORE = Store();
 
 void main() {
-    Store copy = STORE.copy(); // error: can't be copied or compared
+    Store copy = STORE; // error: can only be used to call its methods
+    boolean same = STORE.equals(copy); // error: can't be compared
 }

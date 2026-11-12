@@ -26,7 +26,7 @@ struct UserStore {
     }
 
     User find(int id) {
-        return users[id].copy();
+        return users[id];                    // returns a copy
     }
 
     int size() {
